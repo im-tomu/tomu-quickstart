@@ -29,6 +29,7 @@
 *.hex
 *.ihex
 *.bin
+*.dfu
 
 # Debug files
 *.dSYM/
