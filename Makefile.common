@@ -1,6 +1,6 @@
 PACKAGE    = $(notdir $(realpath .))
 OPENCM3   ?= ../libopencm3
-ADD_CFLAGS = -I$(OPENCM3)/include -DEFM32HG
+ADD_CFLAGS = -I$(OPENCM3)/include -I../include -DEFM32HG
 ADD_LFLAGS = -L$(OPENCM3)/lib -lopencm3_efm32hg
 
 GIT_VERSION= $(shell git describe --tags)
