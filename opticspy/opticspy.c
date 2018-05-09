@@ -319,8 +319,8 @@ int main(void)
 
     /* Set the CPU Core to run from the trimmed USB clock, divided by 2.
      * This will give the CPU Core a frequency of 24 MHz +/- 1% */
-    CMU_CMD = (5 << 0);
-    while (! (CMU_STATUS & (1 << 26)))
+    CMU_CMD = CMU_CMD_HFCLKSEL(5);
+    while (! (CMU_STATUS & CMU_STATUS_USHFRCODIV2SEL))
         ;
 
     /* Enable USB IRQs */
