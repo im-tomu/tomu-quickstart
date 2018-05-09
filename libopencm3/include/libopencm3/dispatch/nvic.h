@@ -31,6 +31,10 @@
 #	include <libopencm3/efm32/gg/nvic.h>
 #elif defined(EFM32HG)
 #	include <libopencm3/efm32/hg/nvic.h>
+#elif defined(EFM32WG)
+#	include <libopencm3/efm32/wg/nvic.h>
+#elif defined(EZR32WG)
+#	include <libopencm3/efm32/ezr32wg/nvic.h>
 
 #elif defined(LPC13XX)
 #	include <libopencm3/lpc13xx/nvic.h>
@@ -51,6 +55,8 @@
 #	include <libopencm3/sam/3u/nvic.h>
 #elif defined(SAM3X)
 #	include <libopencm3/sam/3x/nvic.h>
+#elif defined(SAM4L)
+#	include <libopencm3/sam/4l/nvic.h>
 #elif defined(SAMD)
 #	include <libopencm3/sam/d/nvic.h>
 
