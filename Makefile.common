@@ -60,11 +60,11 @@ $(TARGET): $(OBJECTS) $(LDSCRIPT)
 	$(QUIET) $(CXX) $(OBJECTS) $(LFLAGS) -o $@
 
 $(PACKAGE).bin: $(TARGET)
-	$(QUIET) echo "  OBJCOPY  $(PACKAGE).bin"
+	$(QUIET) echo "  OBJCOPY  $@"
 	$(QUIET) $(OBJCOPY) -O binary $(TARGET) $@
 
 $(PACKAGE).dfu: $(TARGET)
-	$(QUIET) echo "  COPY  $(PACKAGE).bin $(PACKAGE).dfu"
+	$(QUIET) echo "  DFU      $@"
 	$(QUIET) $(COPY) $(PACKAGE).bin $@
 	$(QUIET) dfu-suffix -v 1209 -p 70b1 -a $@
 
