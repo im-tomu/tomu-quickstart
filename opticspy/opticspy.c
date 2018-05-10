@@ -221,7 +221,6 @@ static const char *usb_strings[] =
 };
 
 // This busywait loop is roughly accurate when running at 24 MHz.
-__attribute__((section(".data")))
 void udelay_busy(uint32_t usecs)
 {
     while (usecs --> 0) {
@@ -237,7 +236,6 @@ void udelay_busy(uint32_t usecs)
         asm("nop");
     }
 }
-
 
 /* Buffer to be used for control requests. */
 static uint8_t usbd_control_buffer[128];
