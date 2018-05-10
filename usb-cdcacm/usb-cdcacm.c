@@ -44,6 +44,9 @@
 #include <stdio.h>
 #include <string.h>
 
+//#include "toboot.h"
+//TOBOOT_CONFIGURATION(0);
+
 /* Default AHB (core clock) frequency of Tomu board */
 #define AHB_FREQUENCY 14000000
 
@@ -56,8 +59,8 @@
 #define PRODUCT_ID                0x70b1    /* Assigned to Tomu project */
 #define DEVICE_VER                0x0101    /* Program version */
 
-bool g_usbd_is_connected = false;
-usbd_device *g_usbd_dev = 0;
+static volatile bool g_usbd_is_connected = false;
+static usbd_device *g_usbd_dev = 0;
 
 static const struct usb_device_descriptor dev = {
     .bLength = USB_DT_DEVICE_SIZE,
@@ -199,8 +202,25 @@ static const char *usb_strings[] = {
     "DEMO",
 };
 
+/* This busywait loop is roughly accurate when running at 24 MHz. */
+void udelay_busy(uint32_t usecs)
+{
+    while (usecs --> 0) {
+        /* This inner loop is 3 instructions, one of which is a branch.
+         * This gives us 4 cycles total.
+         * We want to sleep for 1 usec, and there are cycles per usec at 24 MHz.
+         * Therefore, loop 6 times, as 6*4=24.
+         */
+        asm("mov   r1, #6");
+        asm("retry:");
+        asm("sub r1, #1");
+        asm("bne retry");
+        asm("nop");
+    }
+}
+
 /* Buffer to be used for control requests. */
-uint8_t usbd_control_buffer[128];
+static uint8_t usbd_control_buffer[128];
 
 static enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_dev, struct usb_setup_data *req, uint8_t **buf,
         uint16_t *len, void (**complete)(usbd_device *usbd_dev, struct usb_setup_data *req))
@@ -212,6 +232,10 @@ static enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_d
     switch(req->bRequest) {
     case USB_CDC_REQ_SET_CONTROL_LINE_STATE: {
         g_usbd_is_connected = req->wValue & 1; /* Check RTS bit */
+        if (!g_usbd_is_connected) /* Note: GPIO polarity is inverted */
+            gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
+        else
+            gpio_clear(LED_GREEN_PORT, LED_GREEN_PIN);
         return USBD_REQ_HANDLED;
         }
     case USB_CDC_REQ_SET_LINE_CODING: 
@@ -228,13 +252,15 @@ static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
 {
     (void)ep;
 
-    /* We got some data, toggle the green LED */
-    gpio_toggle(LED_GREEN_PORT, LED_GREEN_PIN);
-
     char buf[64];
-    int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
+    int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, sizeof(buf));
 
     if (len) {
+        if (buf[0] == '\r') {
+            buf[1] = '\n';
+            buf[2] = '\0';
+            len++;
+        }
         usbd_ep_write_packet(usbd_dev, 0x82, buf, len);
         buf[len] = 0;
     }
@@ -256,7 +282,7 @@ static void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 }
 
 static void usb_puts(char *s) {
-    if(g_usbd_is_connected) {
+    if (g_usbd_is_connected) {
         usbd_ep_write_packet(g_usbd_dev, 0x82, s, strnlen(s, 64));
     }
 }
@@ -273,10 +299,7 @@ void hard_fault_handler(void)
 
 int main(void)
 {
-    int i;
-
-    /* Make sure the vector table is relocated correctly (after the Tomu bootloader) */
-    SCB_VTOR = 0x4000;
+    bool line_was_connected = false;
 
     /* Disable the watchdog that the bootloader started. */
     WDOG_CTRL = 0;
@@ -302,9 +325,17 @@ int main(void)
     nvic_enable_irq(NVIC_USB_IRQ);
 
     while(1) {
-        usb_puts("toggling LED\n\r");
-        gpio_toggle(LED_RED_PORT, LED_RED_PIN);
-        for(i = 0; i != 500000; ++i)
-            __asm__("nop");
+        if (line_was_connected != g_usbd_is_connected) {
+            if (g_usbd_is_connected) {
+                udelay_busy(2000);
+                usb_puts("\r\nHello world!\r\n");
+                udelay_busy(2000);
+            }
+            line_was_connected = g_usbd_is_connected;
+        }
+
+        usb_puts("toggling LED\n\r");            
+        gpio_toggle(LED_RED_PORT, LED_RED_PIN);  
+        udelay_busy(300000);
     }
 }
