@@ -43,26 +43,36 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
+// Make this program compatible with Toboot-V2.0
 #include <toboot.h>
 TOBOOT_CONFIGURATION(0);
 
-/* Default AHB (core clock) frequency of Tomu board */
-#define AHB_FREQUENCY 14000000
+// Serial prompt
+#define PROMPT          "MSG> "
 
-#define LED_GREEN_PORT GPIOA
-#define LED_GREEN_PIN  GPIO0
-#define LED_RED_PORT   GPIOB
-#define LED_RED_PIN    GPIO7
+#define LED_GREEN_PORT  GPIOA
+#define LED_GREEN_PIN   GPIO0
+#define LED_RED_PORT    GPIOB
+#define LED_RED_PIN     GPIO7
 
-#define VENDOR_ID                 0x1209    /* pid.code */
-#define PRODUCT_ID                0x70b1    /* Assigned to Tomu project */
-#define DEVICE_VER                0x0101    /* Program version */
+#define VENDOR_ID       0x1209  // pid.code
+#define PRODUCT_ID      0x70b1  // Assigned to Tomu project
+#define DEVICE_VER      0x0101  // Program version
+
+#define BIT_TIME_US     52    // Bit time in uS
+                              // Baud rate for transmission = 1,000,000/BIT_TIME = 19230 bps
 
 static volatile bool g_usbd_is_connected = false;
 static usbd_device *g_usbd_dev = 0;
+static uint8_t g_secret_message[1024];
+static uint8_t g_new_secret_message[1024];
+static volatile uint32_t g_new_secret_message_len;
+static volatile bool g_should_use_new_secret_message;
 
-static const struct usb_device_descriptor dev = {
+static const struct usb_device_descriptor dev =
+{
     .bLength = USB_DT_DEVICE_SIZE,
     .bDescriptorType = USB_DT_DEVICE,
     .bcdUSB = 0x0200,
@@ -84,7 +94,8 @@ static const struct usb_device_descriptor dev = {
  * optional, but its absence causes a NULL pointer dereference in Linux
  * cdc_acm driver.
  */
-static const struct usb_endpoint_descriptor comm_endp[] = {{
+static const struct usb_endpoint_descriptor comm_endp[] =
+{{
     .bLength = USB_DT_ENDPOINT_SIZE,
     .bDescriptorType = USB_DT_ENDPOINT,
     .bEndpointAddress = 0x83,
@@ -93,7 +104,8 @@ static const struct usb_endpoint_descriptor comm_endp[] = {{
     .bInterval = 255,
 }};
 
-static const struct usb_endpoint_descriptor data_endp[] = {{
+static const struct usb_endpoint_descriptor data_endp[] =
+{{
     .bLength = USB_DT_ENDPOINT_SIZE,
     .bDescriptorType = USB_DT_ENDPOINT,
     .bEndpointAddress = 0x01,
@@ -114,7 +126,8 @@ static const struct {
     struct usb_cdc_call_management_descriptor call_mgmt;
     struct usb_cdc_acm_descriptor acm;
     struct usb_cdc_union_descriptor cdc_union;
-} __attribute__((packed)) cdcacm_functional_descriptors = {
+} __attribute__((packed)) cdcacm_functional_descriptors =
+{
     .header = {
         .bFunctionLength = sizeof(struct usb_cdc_header_descriptor),
         .bDescriptorType = CS_INTERFACE,
@@ -144,7 +157,8 @@ static const struct {
      }
 };
 
-static const struct usb_interface_descriptor comm_iface[] = {{
+static const struct usb_interface_descriptor comm_iface[] =
+{{
     .bLength = USB_DT_INTERFACE_SIZE,
     .bDescriptorType = USB_DT_INTERFACE,
     .bInterfaceNumber = 0,
@@ -161,7 +175,8 @@ static const struct usb_interface_descriptor comm_iface[] = {{
     .extralen = sizeof(cdcacm_functional_descriptors)
 }};
 
-static const struct usb_interface_descriptor data_iface[] = {{
+static const struct usb_interface_descriptor data_iface[] =
+{{
     .bLength = USB_DT_INTERFACE_SIZE,
     .bDescriptorType = USB_DT_INTERFACE,
     .bInterfaceNumber = 1,
@@ -175,7 +190,8 @@ static const struct usb_interface_descriptor data_iface[] = {{
     .endpoint = data_endp,
 }};
 
-static const struct usb_interface ifaces[] = {{
+static const struct usb_interface ifaces[] =
+{{
     .num_altsetting = 1,
     .altsetting = comm_iface,
 }, {
@@ -183,7 +199,8 @@ static const struct usb_interface ifaces[] = {{
     .altsetting = data_iface,
 }};
 
-static const struct usb_config_descriptor config = {
+static const struct usb_config_descriptor config =
+{
     .bLength = USB_DT_CONFIGURATION_SIZE,
     .bDescriptorType = USB_DT_CONFIGURATION,
     .wTotalLength = 0,
@@ -196,24 +213,28 @@ static const struct usb_config_descriptor config = {
     .interface = ifaces,
 };
 
-static const char *usb_strings[] = {
+static const char *usb_strings[] =
+{
     "Tomu",
-    "CDC-ACM Demo",
-    "DEMO",
+    "OpticSpy Transmitter",
+    "70mu-5py",
 };
 
-void udelay_busy(uint32_t usecs) {
+// This busywait loop is roughly accurate when running at 24 MHz.
+__attribute__((section(".data")))
+void udelay_busy(uint32_t usecs)
+{
     while (usecs --> 0) {
-        asm("nop");
         /* This inner loop is 3 instructions, one of which is a branch.
          * This gives us 4 cycles total.
          * We want to sleep for 1 usec, and there are cycles per usec at 24 MHz.
          * Therefore, loop 6 times, as 6*4=24.
          */
-        asm("mov   r1, #6;");
-        asm("retry:;");
-        asm("sub r1, #1;");
-        asm("bne retry;");
+        asm("mov   r1, #6");
+        asm("retry:");
+        asm("sub r1, #1");
+        asm("bne retry");
+        asm("nop");
     }
 }
 
@@ -251,20 +272,53 @@ static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
 {
     (void)ep;
 
-    /* We got some data, toggle the green LED */
-    //gpio_toggle(LED_GREEN_PORT, LED_GREEN_PIN);
-
     char buf[64];
-    int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, sizeof(buf));
+    char output[64];
+    uint32_t len = usbd_ep_read_packet(usbd_dev, 0x01, buf, sizeof(buf));
 
     if (len) {
-        if (buf[0] == '\r') {
-            buf[1] = '\n';
-            buf[2] = '\0';
-            len++;
+        /* Look for '\r' and append '\n' */
+        uint32_t i;
+        uint32_t new_len = 0;
+        for (i = 0; (i < len) && (new_len < sizeof(buf)); i++) {
+            if (buf[i] == '\r') {
+                output[new_len++] = buf[i];
+                if (new_len >= sizeof(output))
+                    new_len--;
+                output[new_len++] = '\n';
+                if (new_len >= sizeof(output))
+                    new_len--;
+
+                // Switch over to using the new message.
+                g_should_use_new_secret_message = true;
+            }
+            // For backspace characters, go back one space, print a 'space' to overwrite
+            // the character, then move the cursor back by one.
+            else if ((buf[i] == 0x7f) || (buf[i] == '\b')) {
+                if (g_new_secret_message_len > 0) {
+                    output[new_len++] = '\b';
+                    if (new_len >= sizeof(output))
+                        new_len--;
+                    output[new_len++] = ' ';
+                    if (new_len >= sizeof(output))
+                        new_len--;
+                    output[new_len++] = '\b';
+                    if (new_len >= sizeof(output))
+                        new_len--;
+                    g_new_secret_message[--g_new_secret_message_len] = '\0';
+                }
+                continue;
+            }
+            // For printable characters, put them in the new-message buffer.
+            else if (isprint(buf[i])) {
+                g_new_secret_message[g_new_secret_message_len++] = buf[i];
+                output[new_len++] = buf[i];
+                if (new_len >= sizeof(output))
+                    new_len--;
+            }
         }
-        usbd_ep_write_packet(usbd_dev, 0x82, buf, len);
-        buf[len] = 0;
+        usbd_ep_write_packet(usbd_dev, 0x82, output, new_len);
+        output[new_len] = 0;
     }
 }
 
@@ -283,10 +337,48 @@ static void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
                 cdcacm_control_request);
 }
 
-static void usb_puts(char *s) {
+static void usb_puts(char *s)
+{
     if (g_usbd_is_connected) {
         usbd_ep_write_packet(g_usbd_dev, 0x82, s, strnlen(s, 64));
     }
+}
+
+static void opticspy_gpio_set_value(bool is_on)
+{
+    // Note that the LEDs use inverted logic.
+    if (is_on)
+        gpio_clear(LED_RED_PORT, LED_RED_PIN);
+    else
+        gpio_set(LED_RED_PORT, LED_RED_PIN);
+}
+
+static void opticspy_putc(char c)
+{
+    int i;
+
+    // Start bit
+    opticspy_gpio_set_value(1);
+    udelay_busy(BIT_TIME_US);
+
+    // Data bits
+    for (i = 0; i < 8; ++i)
+    {
+        opticspy_gpio_set_value(!((c >> i) & 1));
+        udelay_busy(BIT_TIME_US);
+    }
+
+    // Stop bit
+    opticspy_gpio_set_value(0);
+    udelay_busy(BIT_TIME_US);
+}
+
+static void opticspy_puts(uint8_t *s)
+{
+    int i;
+
+    for (i = 0; s[i] != '\0'; ++i)
+        opticspy_putc(s[i]);
 }
 
 void usb_isr(void)
@@ -312,6 +404,8 @@ int main(void)
     /* Set up both LEDs as outputs */
     gpio_mode_setup(LED_RED_PORT, GPIO_MODE_WIRED_AND, LED_RED_PIN);
     gpio_mode_setup(LED_GREEN_PORT, GPIO_MODE_WIRED_AND, LED_GREEN_PIN);
+    gpio_set(LED_RED_PORT, LED_RED_PIN);
+    gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
 
     /* Configure the USB core & stack */
     g_usbd_dev = usbd_init(&efm32hg_usb_driver, &dev, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
@@ -326,18 +420,37 @@ int main(void)
     /* Enable USB IRQs */
     nvic_enable_irq(NVIC_USB_IRQ);
 
-    while(1) {
+    while (1) {
+        // Send the current secret message out the serial port.
+        opticspy_puts(g_secret_message);
+
         if (line_was_connected != g_usbd_is_connected) {
             if (g_usbd_is_connected) {
+                // Wait for the terminal to appear
                 udelay_busy(1000);
-                usb_puts("Enter message to send, followed by Return:\n\r");
+                usb_puts("\r\nEnter message to send, followed by Return:\r\n" PROMPT);
             }
             line_was_connected = g_usbd_is_connected;
         }
 
-        if (g_usbd_is_connected) {
-            gpio_toggle(LED_RED_PORT, LED_RED_PIN);
-            udelay_busy(1000000);
+        if (!g_usbd_is_connected)
+            continue;
+
+        // Replace the message, if there's a new one available.
+        if (g_should_use_new_secret_message) {
+            memset(g_secret_message, 0, sizeof(g_secret_message));
+
+            // Print a different message depending on whether the new message is blank.
+            if (g_new_secret_message_len) {
+                memcpy(g_secret_message, g_new_secret_message, g_new_secret_message_len);
+                usb_puts("Message updated.\r\n" PROMPT);
+            }
+            else {
+                usb_puts("Message cleared.\r\n" PROMPT);
+            }
+
+            g_should_use_new_secret_message = false;
+            g_new_secret_message_len = 0;
         }
     }
 }
