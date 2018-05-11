@@ -61,8 +61,9 @@ TOBOOT_CONFIGURATION(0);
 #define PRODUCT_ID      0x70b1  // Assigned to Tomu project
 #define DEVICE_VER      0x0101  // Program version
 
-#define BIT_TIME_US     52    // Bit time in uS
-                              // Baud rate for transmission = 1,000,000/BIT_TIME = 19230 bps
+#define BAUD_RATE       19200
+
+#define BIT_TIME_US     (1000000/BAUD_RATE)    // Bit time in uS
 
 static volatile bool g_usbd_is_connected = false;
 static usbd_device *g_usbd_dev = 0;
@@ -377,6 +378,9 @@ static void opticspy_puts(uint8_t *s)
 
     for (i = 0; s[i] != '\0'; ++i)
         opticspy_putc(s[i]);
+    opticspy_putc('\r');
+    opticspy_putc('\n');
+    udelay_busy(5000);
 }
 
 void usb_isr(void)
