@@ -251,7 +251,7 @@ static enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_d
     switch(req->bRequest) {
     case USB_CDC_REQ_SET_CONTROL_LINE_STATE: {
         g_usbd_is_connected = req->wValue & 1; /* Check RTS bit */
-        if (!g_usbd_is_connected) /* Note: GPIO polarity is inverted */
+        if (g_usbd_is_connected) /* Note: GPIO polarity is inverted */
             gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
         else
             gpio_clear(LED_GREEN_PORT, LED_GREEN_PIN);
@@ -375,6 +375,12 @@ static void opticspy_putc(char c)
 static void opticspy_puts(uint8_t *s)
 {
     int i;
+
+    // If there is no message, turn the LED off and return.
+    if (!s[0]) {
+        opticspy_gpio_set_value(0);
+        return;
+    }
 
     for (i = 0; s[i] != '\0'; ++i)
         opticspy_putc(s[i]);
