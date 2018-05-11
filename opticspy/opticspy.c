@@ -147,7 +147,7 @@ static const struct {
         .bFunctionLength = sizeof(struct usb_cdc_acm_descriptor),
         .bDescriptorType = CS_INTERFACE,
         .bDescriptorSubtype = USB_CDC_TYPE_ACM,
-        .bmCapabilities = 0,
+        .bmCapabilities = 6,
     },
     .cdc_union = {
         .bFunctionLength = sizeof(struct usb_cdc_union_descriptor),
