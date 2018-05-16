@@ -46,7 +46,7 @@ void udelay_busy(uint32_t usecs);
  * @brief This vector stores the latest read values from the ACMP
  * @param ACMP_CHANNELS Vector of channels.
  *****************************************************************************/
-static volatile uint32_t channelValues[4] = {0};
+static volatile uint32_t g_channel_values[4] = {0};
 
 /**************************************************************************//**
  * @brief  This stores the maximum values seen by a channel
@@ -57,8 +57,90 @@ static volatile uint32_t channelMaxValues[4] = {0};
 /** The current channel we are sensing. */
 static volatile uint8_t g_current_channel;
 
-/** Flag for measurement completion. */
-static volatile bool measurementComplete;
+/** Which generation of capsense we're on.  Monotonically increasing. */
+static volatile uint32_t g_capsense_generation;
+
+/** Set to true when we're freerunning capsense */
+static volatile bool g_capsense_running = false;
+
+/***************************************************************************//**
+ * @brief
+ *   Sets the ACMP channel used for capacative sensing.
+ *
+ * @note
+ *   A basic example of capacative sensing can be found in the STK BSP
+ *   (capsense demo).
+ *
+ * @param[in] acmp
+ *   Pointer to ACMP peripheral register block.
+ *
+ * @param[in] channel
+ *   The ACMP channel to use for capacative sensing (Possel).
+ ******************************************************************************/
+static void ACMP_CapsenseChannelSet(uint32_t channel)
+{
+    g_current_channel = channel;
+
+    if (channel == 0) {
+        MMIO32(ACMP0_INPUTSEL) = (acmpResistor0 << _ACMP_INPUTSEL_CSRESSEL_SHIFT)
+                            | ACMP_INPUTSEL_CSRESEN
+                            | (false << _ACMP_INPUTSEL_LPREF_SHIFT)
+                            | (0x3f << _ACMP_INPUTSEL_VDDLEVEL_SHIFT)
+                            | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
+                            | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
+    }
+    else if (channel == 1) {
+        MMIO32(ACMP0_INPUTSEL) = (acmpResistor0 << _ACMP_INPUTSEL_CSRESSEL_SHIFT)
+                        | ACMP_INPUTSEL_CSRESEN
+                        | (false << _ACMP_INPUTSEL_LPREF_SHIFT)
+                        | (0x3d << _ACMP_INPUTSEL_VDDLEVEL_SHIFT)
+                        | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
+                        | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
+    }
+    else if (channel == 2)
+        ;
+    else if (channel == 3)
+        ;
+    else
+        while(1);
+}
+
+/**************************************************************************//**
+ * @brief
+ *   Start a capsense measurement of a specific channel and waits for
+ *   it to complete.
+ *****************************************************************************/
+static void CAPSENSE_Measure(uint32_t channel)
+{
+    /* Set up this channel in the ACMP. */
+    ACMP_CapsenseChannelSet(channel);
+
+    /* Reset timers */
+    TIMER0_CNT = 0;
+    TIMER1_CNT = 0;
+
+    /* Start timers */
+    TIMER0_CMD = TIMER_CMD_START;
+    TIMER1_CMD = TIMER_CMD_START;
+
+    if (channel == 2) {
+        gpio_mode_setup(CAP0B_PORT, GPIO_MODE_PUSH_PULL, CAP0B_PIN);
+        gpio_set(CAP0B_PORT, CAP0B_PIN);
+        gpio_mode_setup(CAP0B_PORT, GPIO_MODE_INPUT, CAP0B_PIN);
+        while (gpio_get(CAP0B_PORT, CAP0B_PIN) && (TIMER0_CNT < (TIMER0_TOP - 5)))
+            ;
+        g_channel_values[channel] = TIMER0_CNT;
+    }
+    else if (channel == 3) {
+        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_PUSH_PULL, CAP1B_PIN);
+        gpio_set(CAP1B_PORT, CAP1B_PIN);
+        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_INPUT, CAP1B_PIN);
+        while (gpio_get(CAP1B_PORT, CAP1B_PIN) && (TIMER0_CNT < (TIMER0_TOP - 5)))
+            ;
+        g_channel_values[channel] = TIMER0_CNT;
+    }
+}
+
 
 /**************************************************************************//**
  * @brief
@@ -85,164 +167,39 @@ void timer0_isr(void)
   count = TIMER1_CNT;
 
   /* Store value in channelValues */
-  channelValues[g_current_channel] = count;
+  g_channel_values[g_current_channel] = count;
 
   /* Update channelMaxValues */
   if (count > channelMaxValues[g_current_channel])
     channelMaxValues[g_current_channel] = count;
 
-  measurementComplete = true;
-}
-
-
-/***************************************************************************//**
- * @brief
- *   Disables the ACMP.
- *
- * @param[in] acmp
- *   Pointer to ACMP peripheral register block.
- ******************************************************************************/
-void ACMP_Disable(void)
-{
-  /* Make sure the module exists on the selected chip */
-  EFM_ASSERT(ACMP_REF_VALID(acmp));
-
-  MMIO32(ACMP0_CTRL) &= ~ACMP_CTRL_EN;
-}
-
-/***************************************************************************//**
- * @brief
- *   Enables the ACMP.
- *
- * @param[in] acmp
- *   Pointer to ACMP peripheral register block.
- ******************************************************************************/
-void ACMP_Enable(void)
-{
-  MMIO32(ACMP0_CTRL) |= ACMP_CTRL_EN;
-}
-
-/***************************************************************************//**
- * @brief
- *   Sets the ACMP channel used for capacative sensing.
- *
- * @note
- *   A basic example of capacative sensing can be found in the STK BSP
- *   (capsense demo).
- *
- * @param[in] acmp
- *   Pointer to ACMP peripheral register block.
- *
- * @param[in] channel
- *   The ACMP channel to use for capacative sensing (Possel).
- ******************************************************************************/
-static void ACMP_CapsenseChannelSet(uint32_t channel)
-{
-    /* Make sure the module exists on the selected chip */
-    EFM_ASSERT(ACMP_REF_VALID(acmp));
-
-    g_current_channel = channel;
-
-    if (channel == 0) {
-        MMIO32(ACMP0_INPUTSEL) = (acmpResistor0 << _ACMP_INPUTSEL_CSRESSEL_SHIFT)
-                            | ACMP_INPUTSEL_CSRESEN
-                            | (false << _ACMP_INPUTSEL_LPREF_SHIFT)
-                            | (0x3f << _ACMP_INPUTSEL_VDDLEVEL_SHIFT)
-                            | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
-                            | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
-        gpio_mode_setup(CAP0B_PORT, GPIO_MODE_PUSH_PULL, CAP0B_PIN);
-        gpio_set(CAP0B_PORT, CAP0B_PIN);
-        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_PUSH_PULL, CAP1B_PIN);
-        gpio_set(CAP1B_PORT, CAP1B_PIN);
-    }
-    else if (channel == 1) {
-        MMIO32(ACMP0_INPUTSEL) = (acmpResistor0 << _ACMP_INPUTSEL_CSRESSEL_SHIFT)
-                        | ACMP_INPUTSEL_CSRESEN
-                        | (false << _ACMP_INPUTSEL_LPREF_SHIFT)
-                        | (0x3d << _ACMP_INPUTSEL_VDDLEVEL_SHIFT)
-                        | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
-                        | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
-        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_PUSH_PULL, CAP1B_PIN);
-        gpio_set(CAP1B_PORT, CAP1B_PIN);
-    }
-    else if (channel == 2)
-        ;
-    else if (channel == 3)
-        ;
-    else
-        while(1);
-}
-
-/**************************************************************************//**
- * @brief
- *   Start a capsense measurement of a specific channel and waits for
- *   it to complete.
- *****************************************************************************/
-static uint32_t CAPSENSE_Measure(uint32_t channel)
-{
-    /* Set up this channel in the ACMP. */
-    ACMP_CapsenseChannelSet(channel);
-    //udelay_busy(1000);
-
-    /* Reset timers */
-    TIMER0_CNT = 0;
-    TIMER1_CNT = 0;
-
-    measurementComplete = false;
-
-    /* Start timers */
-    TIMER0_CMD = TIMER_CMD_START;
-    TIMER1_CMD = TIMER_CMD_START;
-
-    if (channel == 2) {
-        gpio_mode_setup(CAP0B_PORT, GPIO_MODE_PUSH_PULL, CAP0B_PIN);
-        gpio_set(CAP0B_PORT, CAP0B_PIN);
-        gpio_mode_setup(CAP0B_PORT, GPIO_MODE_INPUT, CAP0B_PIN);
-        while (gpio_get(CAP0B_PORT, CAP0B_PIN) && !measurementComplete)
-            ;
-        channelValues[channel] = TIMER0_CNT;
-    }
-    else if (channel == 3) {
-        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_PUSH_PULL, CAP1B_PIN);
-        gpio_set(CAP1B_PORT, CAP1B_PIN);
-        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_INPUT, CAP1B_PIN);
-        while (gpio_get(CAP1B_PORT, CAP1B_PIN) && !measurementComplete)
-            ;
-        channelValues[channel] = TIMER0_CNT;
-    }
-
-    /* Wait for measurement to complete */
-    int loops = 0;
-    while (measurementComplete == false)
-    {
-      if (loops++ > (1<<24)) {
-          channelValues[channel] = -1;
-          measurementComplete = true;
+  if (g_capsense_running) {
+      if (g_current_channel >= 3) {
+          g_capsense_generation++;
+          g_current_channel = 0;
       }
-    }
-
-    return channelValues[channel];
+      else {
+          g_current_channel++;
+      }
+      CAPSENSE_Measure(g_current_channel);
+  }
+  else {
+      /* Disable the ACMP, since capsense is no longer running */
+      MMIO32(ACMP0_CTRL) &= ~ACMP_CTRL_EN;
+  }
 }
 
-/**************************************************************************//**
- * @brief
- *   This function iterates through all the capsensors and reads and
- *   initiates a reading. Uses EM1 while waiting for the result from
- *   each sensor.
- *****************************************************************************/
-void CAPSENSE_Sense(void)
-{
-    uint32_t channel;
+void capsense_start(void) {
+    g_capsense_running = true;
 
-    /* Use the default STK capacative sensing setup and enable it */
-    ACMP_Enable();
+    /* Set the "Enable" Bit in ACMP, so we can make analog measurements */
+    MMIO32(ACMP0_CTRL) |= ACMP_CTRL_EN;
 
-    /* Iterate through all channels and check which channel is in use */
-    for (channel = 0; channel < 4; channel++)
-        CAPSENSE_Measure(channel);
+    CAPSENSE_Measure(0);
+}
 
-    /* Disable ACMP while not sensing to reduce power consumption */
-    ACMP_Disable();
+void capsense_stop(void) {
+    g_capsense_running = false;
 }
 
 /***************************************************************************/ /**
@@ -380,6 +337,7 @@ int main(int argc, char **argv)
 
     uint32_t averages[4][16] = {};
     uint32_t average_position = 0;
+    uint32_t last_generation = 0;
 
     /* Disable the watchdog that the bootloader started. */
     WDOG_CTRL = 0;
@@ -388,6 +346,7 @@ int main(int argc, char **argv)
     init_printf(NULL, usb_putc);
     setup();
 
+    capsense_start();
 
     while (1) {
 
@@ -408,11 +367,15 @@ int main(int argc, char **argv)
 
         printf("\r\nMeasuring...\r\n");
 
-        CAPSENSE_Sense();
+        while (g_capsense_generation == last_generation)
+            ;
+        last_generation = g_capsense_generation;
+
+        printf("Measurement generation %6d\n", g_capsense_generation);
 
         for (i = 0; i < 4; i++) {
-            printf("Channel %d:     0x%08x  Max: 0x%08x\n", i, channelValues[i], channelMaxValues[i]);
-            averages[i][average_position&31] = channelValues[i];
+            printf("Channel %d:     0x%08x  Max: 0x%08x\n", i, g_channel_values[i], channelMaxValues[i]);
+            averages[i][average_position&31] = g_channel_values[i];
             uint32_t average = 0;
             int j;
             for (j = 0; j < AVERAGE_SIZE; j++)
