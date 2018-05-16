@@ -23,11 +23,11 @@
 #define PRS_CH_CTRL_SOURCESEL_ACMP_CAPSENSE PRS_CH_CTRL_SOURCESEL_ACMP0
 #define PRS_CH_CTRL_SIGSEL_ACMPOUT_CAPSENSE PRS_CH_CTRL_SIGSEL_ACMP0OUT
 
-#define ACMP_CHANNELS 8
+#define ACMP_CHANNELS 2
 
 #define BUTTON0_CHANNEL 0
 #define BUTTON1_CHANNEL 1
 
-#define CAPSENSE_CH_IN_USE { true, true, false, false, false, false, false, false }
+#define CAPSENSE_CH_IN_USE { true, true }
 
 #endif // _CAPSENSECONFIG_H_

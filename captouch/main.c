@@ -7,6 +7,7 @@
 #include <libopencm3/efm32/cmu.h>
 #include <libopencm3/efm32/gpio.h>
 #include <libopencm3/efm32/common/prs_common.h>
+#include <libopencm3/efm32/common/acmp_common.h>
 #include <libopencm3/efm32/timer.h>
 #include <libopencm3/efm32/wdog.h>
 
@@ -14,17 +15,294 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "captouch.h"
 #include "capsenseconfig.h"
+#include "printf.h"
 
-#define LED_GREEN_PORT      GPIOA
-#define LED_GREEN_PIN       GPIO0
-#define LED_RED_PORT        GPIOB
-#define LED_RED_PIN         GPIO7
+// Make this program compatible with Toboot-V2.0
+#include <toboot.h>
+TOBOOT_CONFIGURATION(0);
 
+#define LED_GREEN_PORT GPIOA
+#define LED_GREEN_PIN GPIO0
+#define LED_RED_PORT GPIOB
+#define LED_RED_PIN GPIO7
+#define CAP0B_PORT GPIOE
+#define CAP0B_PIN GPIO12
+#define CAP1B_PORT GPIOE
+#define CAP1B_PIN GPIO13
+
+#pragma warning "Re-defining TIMER_CC_CTRL_INSEL because it's wrong"
 #undef TIMER_CC_CTRL_INSEL
-#define TIMER_CC_CTRL_INSEL            (1 << 20)
+#define TIMER_CC_CTRL_INSEL (1 << 20)
 
-static void setup_capsense(void) {
+#define EFM_ASSERT(x)
+
+extern void usb_setup(void);
+extern void usb_puts(const char *s);
+void udelay_busy(uint32_t usecs);
+
+/**************************************************************************//**
+ * @brief This vector stores the latest read values from the ACMP
+ * @param ACMP_CHANNELS Vector of channels.
+ *****************************************************************************/
+static volatile uint32_t channelValues[4] = {0};
+
+/**************************************************************************//**
+ * @brief  This stores the maximum values seen by a channel
+ * @param ACMP_CHANNELS Vector of channels.
+ *****************************************************************************/
+static volatile uint32_t channelMaxValues[4] = {0};
+
+/** The current channel we are sensing. */
+static volatile uint8_t g_current_channel;
+
+/** Flag for measurement completion. */
+static volatile bool measurementComplete;
+
+/**************************************************************************//**
+ * @brief
+ *   TIMER0 interrupt handler.
+ *
+ * @detail
+ *   When TIMER0 expires the number of pulses on TIMER1 is inserted into
+ *   channelValues. If this values is bigger than what is recorded in
+ *   channelMaxValues, channelMaxValues is updated.
+ *   Finally, the next ACMP channel is selected.
+ *****************************************************************************/
+void timer0_isr(void)
+{
+  uint32_t count;
+
+  /* Stop timers */
+  TIMER0_CMD = TIMER_CMD_STOP;
+  TIMER1_CMD = TIMER_CMD_STOP;
+
+  /* Clear interrupt flag */
+  TIMER0_IFC = TIMER_IFC_OF;
+
+  /* Read out value of TIMER1 */
+  count = TIMER1_CNT;
+
+  /* Store value in channelValues */
+  channelValues[g_current_channel] = count;
+
+  /* Update channelMaxValues */
+  if (count > channelMaxValues[g_current_channel])
+    channelMaxValues[g_current_channel] = count;
+
+  measurementComplete = true;
+}
+
+
+/***************************************************************************//**
+ * @brief
+ *   Disables the ACMP.
+ *
+ * @param[in] acmp
+ *   Pointer to ACMP peripheral register block.
+ ******************************************************************************/
+void ACMP_Disable(void)
+{
+  /* Make sure the module exists on the selected chip */
+  EFM_ASSERT(ACMP_REF_VALID(acmp));
+
+  MMIO32(ACMP0_CTRL) &= ~ACMP_CTRL_EN;
+}
+
+/***************************************************************************//**
+ * @brief
+ *   Enables the ACMP.
+ *
+ * @param[in] acmp
+ *   Pointer to ACMP peripheral register block.
+ ******************************************************************************/
+void ACMP_Enable(void)
+{
+  MMIO32(ACMP0_CTRL) |= ACMP_CTRL_EN;
+}
+
+/***************************************************************************//**
+ * @brief
+ *   Sets the ACMP channel used for capacative sensing.
+ *
+ * @note
+ *   A basic example of capacative sensing can be found in the STK BSP
+ *   (capsense demo).
+ *
+ * @param[in] acmp
+ *   Pointer to ACMP peripheral register block.
+ *
+ * @param[in] channel
+ *   The ACMP channel to use for capacative sensing (Possel).
+ ******************************************************************************/
+static void ACMP_CapsenseChannelSet(uint32_t channel)
+{
+    /* Make sure the module exists on the selected chip */
+    EFM_ASSERT(ACMP_REF_VALID(acmp));
+
+    g_current_channel = channel;
+
+    if (channel == 0) {
+        MMIO32(ACMP0_INPUTSEL) = (acmpResistor0 << _ACMP_INPUTSEL_CSRESSEL_SHIFT)
+                            | ACMP_INPUTSEL_CSRESEN
+                            | (false << _ACMP_INPUTSEL_LPREF_SHIFT)
+                            | (0x3f << _ACMP_INPUTSEL_VDDLEVEL_SHIFT)
+                            | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
+                            | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
+        gpio_mode_setup(CAP0B_PORT, GPIO_MODE_PUSH_PULL, CAP0B_PIN);
+        gpio_set(CAP0B_PORT, CAP0B_PIN);
+        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_PUSH_PULL, CAP1B_PIN);
+        gpio_set(CAP1B_PORT, CAP1B_PIN);
+    }
+    else if (channel == 1) {
+        MMIO32(ACMP0_INPUTSEL) = (acmpResistor0 << _ACMP_INPUTSEL_CSRESSEL_SHIFT)
+                        | ACMP_INPUTSEL_CSRESEN
+                        | (false << _ACMP_INPUTSEL_LPREF_SHIFT)
+                        | (0x3d << _ACMP_INPUTSEL_VDDLEVEL_SHIFT)
+                        | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
+                        | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
+        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_PUSH_PULL, CAP1B_PIN);
+        gpio_set(CAP1B_PORT, CAP1B_PIN);
+    }
+    else if (channel == 2)
+        ;
+    else if (channel == 3)
+        ;
+    else
+        while(1);
+}
+
+/**************************************************************************//**
+ * @brief
+ *   Start a capsense measurement of a specific channel and waits for
+ *   it to complete.
+ *****************************************************************************/
+static uint32_t CAPSENSE_Measure(uint32_t channel)
+{
+    /* Set up this channel in the ACMP. */
+    ACMP_CapsenseChannelSet(channel);
+    //udelay_busy(1000);
+
+    /* Reset timers */
+    TIMER0_CNT = 0;
+    TIMER1_CNT = 0;
+
+    measurementComplete = false;
+
+    /* Start timers */
+    TIMER0_CMD = TIMER_CMD_START;
+    TIMER1_CMD = TIMER_CMD_START;
+
+    if (channel == 2) {
+        gpio_mode_setup(CAP0B_PORT, GPIO_MODE_PUSH_PULL, CAP0B_PIN);
+        gpio_set(CAP0B_PORT, CAP0B_PIN);
+        gpio_mode_setup(CAP0B_PORT, GPIO_MODE_INPUT, CAP0B_PIN);
+        while (gpio_get(CAP0B_PORT, CAP0B_PIN) && !measurementComplete)
+            ;
+        channelValues[channel] = TIMER0_CNT;
+    }
+    else if (channel == 3) {
+        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_PUSH_PULL, CAP1B_PIN);
+        gpio_set(CAP1B_PORT, CAP1B_PIN);
+        gpio_mode_setup(CAP1B_PORT, GPIO_MODE_INPUT, CAP1B_PIN);
+        while (gpio_get(CAP1B_PORT, CAP1B_PIN) && !measurementComplete)
+            ;
+        channelValues[channel] = TIMER0_CNT;
+    }
+
+    /* Wait for measurement to complete */
+    int loops = 0;
+    while (measurementComplete == false)
+    {
+      if (loops++ > (1<<24)) {
+          channelValues[channel] = -1;
+          measurementComplete = true;
+      }
+    }
+
+    return channelValues[channel];
+}
+
+/**************************************************************************//**
+ * @brief
+ *   This function iterates through all the capsensors and reads and
+ *   initiates a reading. Uses EM1 while waiting for the result from
+ *   each sensor.
+ *****************************************************************************/
+void CAPSENSE_Sense(void)
+{
+    uint32_t channel;
+
+    /* Use the default STK capacative sensing setup and enable it */
+    ACMP_Enable();
+
+    /* Iterate through all channels and check which channel is in use */
+    for (channel = 0; channel < 4; channel++)
+        CAPSENSE_Measure(channel);
+
+    /* Disable ACMP while not sensing to reduce power consumption */
+    ACMP_Disable();
+}
+
+/***************************************************************************/ /**
+ * @brief
+ *   Sets up the ACMP for use in capacative sense applications.
+ *
+ * @details
+ *   This function sets up the ACMP for use in capacacitve sense applications.
+ *   To use the capacative sense functionality in the ACMP you need to use
+ *   the PRS output of the ACMP module to count the number of oscillations
+ *   in the capacative sense circuit (possibly using a TIMER).
+ *
+ * @note
+ *   A basic example of capacative sensing can be found in the STK BSP
+ *   (capsense demo).
+ *
+ * @param[in] acmp
+ *   Pointer to ACMP peripheral register block.
+ *
+ * @param[in] init
+ *   Pointer to initialization structure used to configure ACMP for capacative
+ *   sensing operation.
+ ******************************************************************************/
+
+void setup_acmp_capsense(const struct acmp_capsense_init *init)
+{
+    /* Make sure the module exists on the selected chip */
+    EFM_ASSERT(ACMP_REF_VALID(acmp));
+
+    /* Make sure that vddLevel is within bounds */
+    EFM_ASSERT(init->vddLevel < 64);
+
+    /* Make sure biasprog is within bounds */
+    EFM_ASSERT(init->biasProg <=
+               (_ACMP_CTRL_BIASPROG_MASK >> _ACMP_CTRL_BIASPROG_SHIFT));
+
+    /* Set control register. No need to set interrupt modes */
+    MMIO32(ACMP0_CTRL) = (init->fullBias << _ACMP_CTRL_FULLBIAS_SHIFT)
+                        | (init->halfBias << _ACMP_CTRL_HALFBIAS_SHIFT)
+                        | (init->biasProg << _ACMP_CTRL_BIASPROG_SHIFT)
+                        | (init->warmTime << _ACMP_CTRL_WARMTIME_SHIFT)
+                        | (init->hysteresisLevel << _ACMP_CTRL_HYSTSEL_SHIFT)
+        ;
+
+    /* Select capacative sensing mode by selecting a resistor and enabling it */
+    MMIO32(ACMP0_INPUTSEL) = (init->resistor << _ACMP_INPUTSEL_CSRESSEL_SHIFT)
+                        | ACMP_INPUTSEL_CSRESEN
+                        | (init->lowPowerReferenceEnabled << _ACMP_INPUTSEL_LPREF_SHIFT)
+                        | (init->vddLevel << _ACMP_INPUTSEL_VDDLEVEL_SHIFT)
+                        | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
+        ;
+
+    /* Enable ACMP if requested. */
+    if (init->enable)
+        MMIO32(ACMP0_CTRL) |= (1 << _ACMP_CTRL_EN_SHIFT);
+}
+
+static void setup_capsense(void)
+{
+    const struct acmp_capsense_init capsenseInit = ACMP_CAPSENSE_INIT_DEFAULT;
     CMU_HFPERCLKDIV |= CMU_HFPERCLKDIV_HFPERCLKEN;
     //cmu_periph_clock_enable(CMU_HFPER);
     cmu_periph_clock_enable(CMU_TIMER0);
@@ -33,30 +311,37 @@ static void setup_capsense(void) {
     CMU_HFPERCLKEN0 |= ACMP_CAPSENSE_CLKEN;
     cmu_periph_clock_enable(CMU_PRS);
 
-      /* Initialize TIMER0 - Prescaler 2^9, top value 10, interrupt on overflow */
-    TIMER_CTRL(0) = TIMER_CTRL_PRESC_DIV512;
-    timer_set_top(0, 10);
-    TIMER_IEN(0)  = TIMER_IEN_OF;
-    TIMER_CNT(0)  = 0;
+    /* Initialize TIMER0 - Prescaler 2^9, top value 10, interrupt on overflow */
+    TIMER0_CTRL = TIMER_CTRL_PRESC(TIMER_CTRL_PRESC_DIV512);
+    TIMER0_TOP = 10;
+    TIMER0_IEN = TIMER_IEN_OF;
+    TIMER0_CNT = 0;
 
     /* Initialize TIMER1 - Prescaler 2^10, clock source CC1, top value 0xFFFF */
-    TIMER_CTRL(1) = TIMER_CTRL_PRESC_DIV1024 | TIMER_CTRL_CLKSEL_CC1;
-    timer_set_top(1, 0xffff);
+    TIMER1_CTRL = TIMER_CTRL_PRESC(TIMER_CTRL_PRESC_DIV1024) | TIMER_CTRL_CLKSEL(TIMER_CTRL_CLKSEL_CC1);
+    TIMER1_TOP  = 0xFFFF;
 
     /* Set up TIMER1 CC1 to trigger on PRS channel 0 */
-    TIMER_CC1_CTRL(1) = TIMER_CC_CTRL_MODE_INPUTCAPTURE /* Input capture      */
-                       | TIMER_CC_CTRL_PRSSEL_PRSCH0   /* PRS channel 0      */
-                       | TIMER_CC_CTRL_INSEL       /* PRS input selected */
-                       | TIMER_CC_CTRL_ICEVCTRL_RISING /* PRS on rising edge */
-                       | TIMER_CC_CTRL_ICEDGE_BOTH;    /* PRS on rising edge */
+    TIMER1_CC1_CTRL = TIMER_CC_CTRL_MODE(TIMER_CC_CTRL_MODE_INPUTCAPTURE) /* Input capture      */
+                        | TIMER_CC_CTRL_PRSSEL(TIMER_CC_CTRL_PRSSEL_PRSCH0)   /* PRS channel 0      */
+                        | TIMER_CC_CTRL_INSEL           /* PRS input selected */
+                        | TIMER_CC_CTRL_ICEVCTRL(TIMER_CC_CTRL_ICEVCTRL_RISING) /* PRS on rising edge */
+                        | TIMER_CC_CTRL_ICEDGE(TIMER_CC_CTRL_ICEDGE_BOTH);    /* PRS on rising edge */
 
-  /*Set up PRS channel 0 to trigger on ACMP1 output*/
-  PRS_CH0_CTRL = PRS_CH_CTRL_EDSEL_POSEDGE      /* Posedge triggers action */
-                    | PRS_CH_CTRL_SOURCESEL_ACMP_CAPSENSE      /* PRS source */
-                    | PRS_CH_CTRL_SIGSEL_ACMPOUT_CAPSENSE;     /* PRS source */
+    /*Set up PRS channel 0 to trigger on ACMP0 output*/
+    PRS_CH0_CTRL = PRS_CH_CTRL_EDSEL_POSEDGE              /* Posedge triggers action */
+                   | PRS_CH_CTRL_SOURCESEL(PRS_CH_CTRL_SOURCESEL_ACMP_CAPSENSE)  /* PRS source */
+                   | PRS_CH_CTRL_SIGSEL(PRS_CH_CTRL_SIGSEL_ACMPOUT_CAPSENSE); /* PRS signal */
+
+    /* Set up ACMP0 in capsense mode */
+    setup_acmp_capsense(&capsenseInit);
+
+    /* Enable TIMER0 interrupt */
+    nvic_enable_irq(NVIC_TIMER0_IRQ);
 }
 
-static void setup(void) {
+static void setup(void)
+{
     /* GPIO peripheral clock is necessary for us to set up the GPIO pins as outputs */
     cmu_periph_clock_enable(CMU_GPIO);
 
@@ -67,6 +352,86 @@ static void setup(void) {
     setup_capsense();
 }
 
-int main(int argc, char **argv) {
+static char output_buffer[65];
+static uint32_t output_buffer_pos;
+
+static void usb_putc(void *ign, char c) {
+    (void)ign;
+    output_buffer[output_buffer_pos++] = c;
+    if ((c == '\n') || (output_buffer_pos >= sizeof(output_buffer)-1)) {
+        if ((c == '\n') || (output_buffer_pos < sizeof(output_buffer)-1))
+            output_buffer[output_buffer_pos++] = '\r';
+        output_buffer[output_buffer_pos] = '\0';
+        usb_puts(output_buffer);
+        output_buffer_pos = 0;
+    }
+}
+
+int main(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    #define AVERAGE_SIZE 16
+    const char *go_to_home = "\x1b[H";
+    const char *clear = "\x1b[J";
+    int i;
+    extern volatile bool g_usbd_is_connected;
+    bool usb_was_connected = false;
+
+    uint32_t averages[4][16] = {};
+    uint32_t average_position = 0;
+
+    /* Disable the watchdog that the bootloader started. */
+    WDOG_CTRL = 0;
+
+    usb_setup();
+    init_printf(NULL, usb_putc);
     setup();
+
+
+    while (1) {
+
+        // If USB isn't connected, don't do anything.
+        if (!g_usbd_is_connected) {
+            usb_was_connected = false;
+            continue;
+        }
+
+        // If usb wasn't connected (but is now), clear the screen.
+        if (!usb_was_connected) {
+            udelay_busy(100000);
+            usb_puts(clear);
+            usb_puts(go_to_home);
+            usb_puts("\x1b[3;J\x1b[H\x1b[2J");
+            usb_was_connected = true;
+        }
+
+        printf("\r\nMeasuring...\r\n");
+
+        CAPSENSE_Sense();
+
+        for (i = 0; i < 4; i++) {
+            printf("Channel %d:     0x%08x  Max: 0x%08x\n", i, channelValues[i], channelMaxValues[i]);
+            averages[i][average_position&31] = channelValues[i];
+            uint32_t average = 0;
+            int j;
+            for (j = 0; j < AVERAGE_SIZE; j++)
+                average += averages[i][j];
+            average /= AVERAGE_SIZE;
+            printf("        Average: %5d\n", average);
+        }
+        average_position++;
+        if (average_position >= AVERAGE_SIZE)
+            average_position = 0;
+        usb_puts(go_to_home);
+
+        /*
+        printf("TIMER0_CTRL:   0x%08x\n", TIMER0_CTRL);
+        printf("TIMER0_STATUS: 0x%08x\n", TIMER0_STATUS);
+        printf("TIMER0_CNT:    0x%08x\n", TIMER0_CNT);
+        printf("TIMER0_IEN:    0x%08x\n", TIMER0_IEN);
+        printf("TIMER0_IF:     0x%08x\n", TIMER0_IF);
+        udelay_busy(200000);
+        */
+    }
 }
