@@ -49,8 +49,8 @@ TOBOOT_CONFIGURATION(0);
 /* Systick interrupt frequency, Hz */
 #define SYSTICK_FREQUENCY 1000
 
-/* Default AHB (core clock) frequency of Tomu board */
-#define AHB_FREQUENCY 14000000
+/* USB (core clock) frequency of Tomu board */
+#define USB_CLK_FREQUENCY 24000000
 
 #define LED_GREEN_PORT GPIOA
 #define LED_GREEN_PIN  GPIO0
@@ -87,7 +87,16 @@ int main(void)
     gpio_clear(LED_GREEN_PORT, LED_GREEN_PIN);
 
     /* Configure the system tick */
-    systick_set_frequency(SYSTICK_FREQUENCY, AHB_FREQUENCY);
+    /* Set the CPU Core to run from the trimmed USB clock, divided by 2.
+     * This will give the CPU Core a frequency of 24 MHz +/- 1% */
+    cmu_osc_on(USHFRCO);
+    cmu_wait_for_osc_ready(USHFRCO);
+    CMU_USBCRCTRL = CMU_USBCRCTRL_EN;
+    CMU_CMD = CMU_CMD_HFCLKSEL(5);
+    while (! (CMU_STATUS & CMU_STATUS_USHFRCODIV2SEL))
+        ;
+
+    systick_set_frequency(SYSTICK_FREQUENCY, USB_CLK_FREQUENCY);
     systick_counter_enable();
     systick_interrupt_enable();
 
