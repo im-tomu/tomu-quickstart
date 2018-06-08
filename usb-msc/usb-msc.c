@@ -22,12 +22,12 @@
 /**
  * \addtogroup Examples
  *
- * This example implements a USB CDC-ACM device (aka Virtual Serial Port)
- * to demonstrate the use of the USB device stack.
+ * This example implements a USB MSC device (aka Mass Storage Controller,
+ * aka hard disk) to demonstrate the use of the USB device stack.  Any
+ * data written to the disk will be erased when the device is reset.
  *
- * When data is recieved, it will toggle the green LED and echo the data.
- * The red LED is toggled constantly and a string is sent over USB every
- * time the LED changes state as a heartbeat.
+ * When data is recieved, it will toggle the green LED.
+ * The red LED is toggled constantly.
  */
 
 #include <libopencm3/cm3/common.h>
