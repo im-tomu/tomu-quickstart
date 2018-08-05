@@ -30,7 +30,7 @@ To build an example, go into the directory and type `make`.
 
 ## Loading Examples
 
-To load examples onto Tomu, ensure it is in DFU mode by verifying that the red and green LEDs are alternately blinkinking, and that it shows up if you run `dfu-util --list`.  Then, load the sample you want using `dfu-util --download`.
+To load examples onto Tomu, ensure it is in DFU mode by verifying that the red and green LEDs are alternately blinking, and that it shows up if you run `dfu-util --list`.  Then, load the sample you want using `dfu-util --download`.
 
 To load another program, unplug Tomu and plug it back in.
 
