@@ -39,3 +39,12 @@ To load another program, unplug Tomu and plug it back in.
 To create a new project, simply copy an existing project.  The [`bare-minimum`](./bare-minimum) project is a good example if you want to start from scratch.
 
 The new project's .dfu file will be based on the directory name.
+
+## Troubleshooting Tips
+
+* Some versions of the bootloader don't like toboot v0 programs. If you load a program and get a stream of `test-in-progress` over the USD serial console instead of what you expect the program to do, you may need to add the following near the top of the program and recompile:
+  ```
+  // Make this program compatible with Toboot-V2.0
+  #include <toboot.h>
+  TOBOOT_CONFIGURATION(0);
+  ```
