@@ -44,7 +44,7 @@ The new project's .dfu file will be based on the directory name.
 
 * The `miniblink` program, when correctly operating, looks quite similar to the bootloader's "waiting for instructions" state. You can change this by editing the `system_millis` check in the `sys_tick_handler` function to make the LEDs flash faster or slower.
 
-* Some versions of the bootloader don't like toboot v0 programs. If you load a program and get a stream of `test-in-progress` over the USD serial console instead of what you expect the program to do, you may need to add the following near the top of the program and recompile:
+* Early versions of the bootloader only work with programs that have a toboot-v2.0 signature.  If you load a program and get a stream of `test-in-progress` over the USB serial console instead of what you expect the program to do, you should [upgrade toboot](https://github.com/im-tomu/tomu-bootloader#installing-or-upgrading-toboot).  To add a toboot-v2.0 signature, add the following near the top of the program and recompile:
   ```
   // Make this program compatible with Toboot-V2.0
   #include <toboot.h>
