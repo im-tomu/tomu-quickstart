@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 cd libopencm3-upstream
-#make
+make
 
 mkdir -p ../libopencm3/lib
 cp lib/libopencm3_efm32hg.a ../libopencm3/lib
