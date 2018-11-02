@@ -4,6 +4,8 @@ This guide describes everything you need to set up your system to develop for [T
 
 This quickstart guide is designed to be used on Mac, Windows, Linux, and anything else that can run GCC and Make.
 
+The [main Tomu U2F firmware](https://github.com/im-tomu/chopstx/tree/efm32/u2f) is in a different repo.
+
 ## Overview of Requirements
 
 To build and load sample code, you will need three things:
@@ -26,7 +28,7 @@ This quickstart repo differs from the samples repo in that it has a prebuilt ver
 
 ## Building Examples
 
-To build an example, go into the directory and type `make`.
+To build an example, go into the directory and type `make`. For example, `bare-minimum`.
 
 ## Loading Examples
 
