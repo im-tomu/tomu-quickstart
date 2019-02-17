@@ -238,7 +238,7 @@ void sys_tick_handler(void)
 }
 
 // HID Usage Tables
-// http://www.usb.org/developers/hidpage/Hut1_12v2.pdf
+// https://www.usb.org/sites/default/files/documents/hut1_12v2.pdf
 
 void injkeys(char *source,uint8_t mod)
 {
