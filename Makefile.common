@@ -3,7 +3,7 @@ OPENCM3   ?= ../libopencm3
 ADD_CFLAGS = -I$(OPENCM3)/include -I../include -DEFM32HG
 ADD_LFLAGS = -L$(OPENCM3)/lib -lopencm3_efm32hg
 
-GIT_VERSION= $(shell git describe --tags)
+GIT_VERSION := $(shell git describe --tags)
 TRGT      ?= arm-none-eabi-
 CC         = $(TRGT)gcc
 CXX        = $(TRGT)g++
