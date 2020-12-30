@@ -32,9 +32,21 @@ To build an example, go into the directory and type `make`. For example, `bare-m
 
 ## Loading Examples
 
+### Upgrade toboot (if needed)
+Before you start, check if you have an old bootloader. On linux, it will look like this in dmesg:
+"Product: Tomu Bootloader" instead of "Product: Tomu Bootloader (5) v2.0-rc7"  
+If you flash a program, you will lose the bootloader and require a recovery procedure to get the bootloader back.  
+Either way, you need to go to: https://github.com/im-tomu/toboot . If you lost your bootloader, you will have to
+short external pads 1 and 4 before you insert tomu. After that, you'll need to flash 2 files:
+* "sudo dfu-util --download toboot-boosted.dfu" (flash, and then re-insert tomu)
+* tomu should now look like this in dmesg "Tomu Bootloader (1) v2.0-rc7"
+* flash a 2nd time with "sudo dfu-util -D toboot-boosted.bin"
+* now tomu should say "Tomu Bootloader (5) v2.0-rc7"
+
+### Load an an example
 To load examples onto Tomu, ensure it is in DFU mode by verifying that the red and green LEDs are alternately blinking, and that it shows up if you run `sudo dfu-util --list`.  Then, load the sample you want using `dfu-util --download project.dfu`.
 
-Note that you may need to use sudo to have permissions to flash:
+Note that you may need to use sudo or proper udev permissions to flash:
 ```
 sauron [mc]$ dfu-util --download miniblink.dfu
 Match vendor ID from file: 1209
@@ -58,7 +70,19 @@ Copying data from PC to DFU device
 Download	[=========================] 100%         1164 bytes
 ```
 
-To load another program, unplug Tomu and plug it back in.
+### Permissions and udev
+If you need to run sudo every time, on linux you can add some udev rules change permissions automatically.
+Write this into /etc/udev/rules.d/10-tomu.rules, then run 'udevadm trigger', and re-insert the device.
+```
+# Device #1, unknown?
+ACTION=="add|change", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="cdab", TAG+="uaccess"
+# Device #2: Tomu old and new bootloaders:
+ACTION=="add|change", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="70b1", TAG+="uaccess"
+```
+
+### Loading the next program, or "help, I can't load the next program"
+To load another program, unplug Tomu and plug it back in.  If you do not get the tomu bootloader when you do so,
+jump back to the beginning of this section and see how to force boot into toboot and upgrade it.
 
 ## Creating a new Project
 
