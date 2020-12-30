@@ -32,7 +32,31 @@ To build an example, go into the directory and type `make`. For example, `bare-m
 
 ## Loading Examples
 
-To load examples onto Tomu, ensure it is in DFU mode by verifying that the red and green LEDs are alternately blinking, and that it shows up if you run `dfu-util --list`.  Then, load the sample you want using `dfu-util --download`.
+To load examples onto Tomu, ensure it is in DFU mode by verifying that the red and green LEDs are alternately blinking, and that it shows up if you run `sudo dfu-util --list`.  Then, load the sample you want using `dfu-util --download project.dfu`.
+
+Note that you may need to use sudo to have permissions to flash:
+```
+sauron [mc]$ dfu-util --download miniblink.dfu
+Match vendor ID from file: 1209
+Match product ID from file: 70b1
+dfu-util: Cannot open DFU device 1209:70b1
+dfu-util: No DFU capable USB device available
+
+sauron [mc]$ sudo dfu-util --download miniblink.dfu
+Match vendor ID from file: 1209
+Match product ID from file: 70b1
+Opening DFU capable USB device...
+ID 1209:70b1
+Run-time device DFU version 0101
+Claiming USB DFU Interface...
+Setting Alternate Setting #0 ...
+Determining device status: state = dfuIDLE, status = 0
+dfuIDLE, continuing
+DFU mode device DFU version 0101
+Device returned transfer size 1024
+Copying data from PC to DFU device
+Download	[=========================] 100%         1164 bytes
+```
 
 To load another program, unplug Tomu and plug it back in.
 
