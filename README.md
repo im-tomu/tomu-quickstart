@@ -24,6 +24,8 @@ Platform   | ARM Toolchain  | Make  | dfu-util
 *Fedora* | `sudo dnf install arm-none-eabi-newlib arm-none-eabi-gcc-cs-c++` | `sudo dnf install make` | `sudo dnf install dfu-util`
 *Arch* | `sudo pacman -S arm-none-eabi-gcc arm-none-eabi-newlib` | `sudo pacman -S make` | `sudo pacman -S dfu-util`
 
+If you don't have dfu-util (for instance a chromebook), you may be able to flash from a chrome browser with https://dfu.tomu.im/ 
+
 This quickstart repo differs from the samples repo in that it has a prebuilt version of `libopencm3`, which normally requires various command line programs to compile.  This cuts down on compile time, and enables building on platforms that don't have commands like grep, printf, or cat.
 
 ## Building Examples
