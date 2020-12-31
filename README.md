@@ -76,9 +76,6 @@ Download	[=========================] 100%         1164 bytes
 If you need to run sudo every time, on linux you can add some udev rules change permissions automatically.
 Write this into /etc/udev/rules.d/10-tomu.rules, then run 'udevadm trigger', and re-insert the device.
 ```
-# Device #1, unknown?
-ACTION=="add|change", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="cdab", TAG+="uaccess"
-# Device #2: Tomu old and new bootloaders:
 ACTION=="add|change", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="70b1", TAG+="uaccess"
 ```
 
