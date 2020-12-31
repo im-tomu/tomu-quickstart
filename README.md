@@ -36,10 +36,12 @@ To build an example, go into the directory and type `make`. For example, `bare-m
 
 ### Upgrade toboot (if needed)
 Before you start, check if you have an old bootloader. On linux, it will look like this in dmesg:
-"Product: Tomu Bootloader" instead of "Product: Tomu Bootloader (5) v2.0-rc7"  
-If you flash a program, you will lose the bootloader and require a recovery procedure to get the bootloader back.  
-Either way, you need to go to: https://github.com/im-tomu/toboot . If you lost your bootloader, you will have to
-short external pads 1 and 4 before you insert tomu. After that, you'll need to flash 2 files:
+`Product: Tomu Bootloader` instead of `Product: Tomu Bootloader (5) v2.0-rc7`  
+If you flash a program, you will require a recovery procedure to get the flashing bootloader
+back by default.  
+You will need to go to: https://github.com/im-tomu/toboot and if you lost your bootloader, you will have to
+short external pads 1 and 4 before you insert tomu.  
+After that, you'll need to flash 2 files:
 * "sudo dfu-util --download toboot-boosted.dfu" (flash, and then re-insert tomu)
 * tomu should now look like this in dmesg "Tomu Bootloader (1) v2.0-rc7"
 * flash a 2nd time with "sudo dfu-util -D toboot-boosted.bin"
