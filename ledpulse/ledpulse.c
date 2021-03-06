@@ -62,15 +62,6 @@ TOBOOT_CONFIGURATION(0);
 
 volatile uint32_t system_millis = 0;
 
-
-
-#define GPIO_PBT_RD    14
-
-int pbt_get (void)
-{
-  return ((GPIO_PBT->IDR >> GPIO_PBT_RD) & 1) ^ GPIO_PBT_IS_LO;
-}
-
 void sys_tick_handler(void) {
     static uint16_t tick = 0;
     static int8_t  red_pwm_change =  4;
