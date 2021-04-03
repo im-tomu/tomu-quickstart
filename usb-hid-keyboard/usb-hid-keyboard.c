@@ -55,7 +55,8 @@
 #define PRODUCT_ID                0x70b1    /* Assigned to Tomu project */
 #define DEVICE_VER                0x0101    /* Program version */
 
-// Declare injectkeys function
+// Declare functions
+void run_notepad();
 void injkeys(char *source,uint8_t mod);
 
 bool g_usbd_is_connected = false;
@@ -229,7 +230,8 @@ void sys_tick_handler(void)
 {
     if(g_usbd_is_connected && once) {
 
-	for(int i = 0; i != 3500000; ++i) __asm__("nop");  // wait before keys injection
+	for(int i = 0; i != 3500000; ++i) __asm__("nop");  // wait before keys injection	
+	// run_notepad(); // Uncomment to open notepad on Windows
 	injkeys("this is an example of key injection 0123456789",0);
 	injkeys(" . . ",0); // Can't send two consecutive identical caracters ...
 	injkeys("this is an example of key injection 0123456789",2);
@@ -259,6 +261,8 @@ void injkeys(char *source,uint8_t mod)
 			buf[2]=44;
 		else if(source[j]==46) // .
 			buf[2]=55;
+		else if(source[j]=='\r') // CR (Enter)
+			buf[2]=40;
 		else
 			buf[2]=source[j]-93; // lowercase letters
 
@@ -275,6 +279,25 @@ void injkeys(char *source,uint8_t mod)
  }
 
 }
+
+// Open "notepad" in Windows
+void run_notepad()
+{
+	// Modifier info: https://wiki.osdev.org/USB_Human_Interface_Devices#Report_format
+	#define LEFT_GUI_KEY 0x08 // Key modifier
+	
+	// Inject Left Gui (Winkey) + "r", to open the "Run" console.
+	injkeys("r", LEFT_GUI_KEY);
+
+	// Wait for the "Run" console to open before injecting command
+	for (unsigned int i = 0; i != 1500000; ++i) {
+		__asm__("nop");
+	}
+
+	// Inject string "notepad" + Enter key
+	injkeys("notepad\r", 0);
+}
+
 int main(void)
 {
     int i;
