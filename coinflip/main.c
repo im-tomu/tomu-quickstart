@@ -93,54 +93,71 @@ static void setup(void);
 // Main loop called to 
 int main(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
-
-    int i;
-
     uint32_t last_generation = 0;
     uint32_t tick_count = 0;
     uint8_t coin_flip = 0;
-    uint32_t average = 0;
+    uint32_t sum = 0;
 
     /* Disable the watchdog that the bootloader started. */
     WDOG_CTRL = 0;
 
+    // Setup much of the functionality necessary for the coin flip program
     setup();
 
+    // Start the capsense functionality
     capsense_start();
 
+    // Set both LEDs to turn them off
     gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
     gpio_set(LED_RED_PORT, LED_RED_PIN);
 
+    // Main body of the code
     while (1) {
+        // Function to delay until the newest value from the capacitive buttons has come through
+        // Notice the use of == instead of >= as at some point this variable will overflow and still
+        // needs to operate
         while (g_capsense_generation == last_generation) {};
+
+        // Change the generation number to show that it is a new generation
         last_generation = g_capsense_generation;
 
+        // Only use the capsense value if the coin hasn't been flipped recently
         if(coin_flip==0) {
+            // Go through each of the capsense values to determine when the buttons have been pressed
             for (int i = 0; i < 4; i++) {
-                average += g_channel_values[i];
+                // Use the sum of their values to determine if a button has been pressed
+                sum += g_channel_values[i];
             }
-            if(average > CAPSENSE_DETECT_MIN) {
+            // Minimum threshold for the button press to register
+            if(sum > CAPSENSE_DETECT_MIN) {
+                // Use the odd/even value of the tick count to determine if the coin flip was red(head) or green(tails)
                 if(tick_count%2==0){
+                    // Tick count was even, thus turn on the red LED
                     gpio_clear(LED_RED_PORT, LED_RED_PIN);
                     coin_flip=1;
                 } else {
+                    // Tick count was odd, thus turn on the green LED
                     gpio_clear(LED_GREEN_PORT, LED_GREEN_PIN);
                     coin_flip=2;
                 }
+                // Reset the tick count to use as a timer
                 tick_count = 0;
             }
-            average = 0;
+            // Reset the sum value so it doesn't grow across multiple loops
+            sum = 0;
         }
 
+        // Increment the tick counter so that LED timing can be preserved
+        // an improvement would be to increment this in a system interrupt
         tick_count++;
 
+        // If the tick count has equaled the appropriate delay for the on time then turn off the LEDs
         if(tick_count == LED_ON_DELAY) {
+            // Turn off the LEDs
             gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
             gpio_set(LED_RED_PORT, LED_RED_PIN);
-            // coin_flip = 0;
         } else if(tick_count >= LED_OFF_DELAY) {
+            // Once the tick count delay has exceeded, reset the coin_flip variable
             coin_flip = 0;
         }
     }
@@ -152,24 +169,22 @@ static void ACMP_CapsenseChannelSet(uint32_t channel)
 
     if (channel == 0) {
         MMIO32(ACMP0_INPUTSEL) = (acmpResistor0 << _ACMP_INPUTSEL_CSRESSEL_SHIFT)
-                            | ACMP_INPUTSEL_CSRESEN
-                            | (false << _ACMP_INPUTSEL_LPREF_SHIFT)
-                            | (0x3f << _ACMP_INPUTSEL_VDDLEVEL_SHIFT)
-                            | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
-                            | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
+                        | ACMP_INPUTSEL_CSRESEN
+                        | (false << _ACMP_INPUTSEL_LPREF_SHIFT)
+                        | (0x3f << _ACMP_INPUTSEL_VDDLEVEL_SHIFT) // 0x3f for channel 0 and 0x3d for channel 1
+                        | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
+                        | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
     }
     else if (channel == 1) {
         MMIO32(ACMP0_INPUTSEL) = (acmpResistor0 << _ACMP_INPUTSEL_CSRESSEL_SHIFT)
                         | ACMP_INPUTSEL_CSRESEN
                         | (false << _ACMP_INPUTSEL_LPREF_SHIFT)
-                        | (0x3d << _ACMP_INPUTSEL_VDDLEVEL_SHIFT)
+                        | (0x3d << _ACMP_INPUTSEL_VDDLEVEL_SHIFT) // 0x3f for channel 0 and 0x3d for channel 1
                         | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
                         | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
     }
-    else if (channel == 2)
-        ;
-    else if (channel == 3)
-        ;
+    else if (channel == 2) {};
+    else if (channel == 3) {};
     else
         while(1);
 }
