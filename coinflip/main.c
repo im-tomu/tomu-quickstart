@@ -17,7 +17,7 @@
 
 // Make this program compatible with Toboot-V2.0
 #include <toboot.h>
-TOBOOT_CONFIGURATION(0);
+TOBOOT_CONFIGURATION(TOBOOT_CONFIG_FLAG_AUTORUN);
 
 #define LED_GREEN_PORT GPIOA
 #define LED_GREEN_PIN GPIO0
@@ -27,6 +27,15 @@ TOBOOT_CONFIGURATION(0);
 #define CAP0B_PIN GPIO12
 #define CAP1B_PORT GPIOE
 #define CAP1B_PIN GPIO13
+
+// Delay after the LED goes on before it turns off
+#define LED_ON_DELAY 1000
+
+// Delay after the LED goes off before the 'coin' can be flipped again
+#define LED_OFF_DELAY 2000
+
+// Minimum values for the capsense detect to work
+#define CAPSENSE_DETECT_MIN 20
 
 #pragma warning "Re-defining TIMER_CC_CTRL_INSEL because it's wrong"
 #undef TIMER_CC_CTRL_INSEL
@@ -324,15 +333,14 @@ int main(int argc, char **argv)
     gpio_set(LED_RED_PORT, LED_RED_PIN);
 
     while (1) {
-        while (g_capsense_generation == last_generation)
-            ;
+        while (g_capsense_generation == last_generation) {};
         last_generation = g_capsense_generation;
 
         if(coin_flip==0) {
-            for (i = 0; i < 4; i++) {
+            for (int i = 0; i < 4; i++) {
                 average += g_channel_values[i];
             }
-            if(average > 40) {
+            if(average > CAPSENSE_DETECT_MIN) {
                 if(tick_count%2==0){
                     gpio_clear(LED_RED_PORT, LED_RED_PIN);
                     coin_flip=1;
@@ -347,11 +355,11 @@ int main(int argc, char **argv)
 
         tick_count++;
 
-        if(tick_count == 1000) {
+        if(tick_count == LED_ON_DELAY) {
             gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
             gpio_set(LED_RED_PORT, LED_RED_PIN);
             // coin_flip = 0;
-        } else if(tick_count >= 4000) {
+        } else if(tick_count >= LED_OFF_DELAY) {
             coin_flip = 0;
         }
     }
