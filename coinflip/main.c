@@ -78,6 +78,74 @@ static volatile bool g_capsense_running = false;
  * @param[in] channel
  *   The ACMP channel to use for capacative sensing (Possel).
  ******************************************************************************/
+
+// Function prototypes so that our main loop can be at the top of the file for readability purposes
+static void ACMP_CapsenseChannelSet(uint32_t channel);
+static void CAPSENSE_Measure(uint32_t channel);
+static void CAPSENSE_Measure(uint32_t channel);
+void timer0_isr(void);
+void capsense_start(void);
+void capsense_stop(void);
+void setup_acmp_capsense(const struct acmp_capsense_init *init);
+static void setup_capsense(void);
+static void setup(void);
+
+// Main loop called to 
+int main(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    int i;
+
+    uint32_t last_generation = 0;
+    uint32_t tick_count = 0;
+    uint8_t coin_flip = 0;
+    uint32_t average = 0;
+
+    /* Disable the watchdog that the bootloader started. */
+    WDOG_CTRL = 0;
+
+    setup();
+
+    capsense_start();
+
+    gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
+    gpio_set(LED_RED_PORT, LED_RED_PIN);
+
+    while (1) {
+        while (g_capsense_generation == last_generation) {};
+        last_generation = g_capsense_generation;
+
+        if(coin_flip==0) {
+            for (int i = 0; i < 4; i++) {
+                average += g_channel_values[i];
+            }
+            if(average > CAPSENSE_DETECT_MIN) {
+                if(tick_count%2==0){
+                    gpio_clear(LED_RED_PORT, LED_RED_PIN);
+                    coin_flip=1;
+                } else {
+                    gpio_clear(LED_GREEN_PORT, LED_GREEN_PIN);
+                    coin_flip=2;
+                }
+                tick_count = 0;
+            }
+            average = 0;
+        }
+
+        tick_count++;
+
+        if(tick_count == LED_ON_DELAY) {
+            gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
+            gpio_set(LED_RED_PORT, LED_RED_PIN);
+            // coin_flip = 0;
+        } else if(tick_count >= LED_OFF_DELAY) {
+            coin_flip = 0;
+        }
+    }
+}
+
 static void ACMP_CapsenseChannelSet(uint32_t channel)
 {
     g_current_channel = channel;
@@ -308,59 +376,4 @@ static void setup(void)
     gpio_mode_setup(LED_GREEN_PORT, GPIO_MODE_WIRED_AND, LED_GREEN_PIN);
 
     setup_capsense();
-}
-
-int main(int argc, char **argv)
-{
-    (void)argc;
-    (void)argv;
-
-    int i;
-
-    uint32_t last_generation = 0;
-    uint32_t tick_count = 0;
-    uint8_t coin_flip = 0;
-    uint32_t average = 0;
-
-    /* Disable the watchdog that the bootloader started. */
-    WDOG_CTRL = 0;
-
-    setup();
-
-    capsense_start();
-
-    gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
-    gpio_set(LED_RED_PORT, LED_RED_PIN);
-
-    while (1) {
-        while (g_capsense_generation == last_generation) {};
-        last_generation = g_capsense_generation;
-
-        if(coin_flip==0) {
-            for (int i = 0; i < 4; i++) {
-                average += g_channel_values[i];
-            }
-            if(average > CAPSENSE_DETECT_MIN) {
-                if(tick_count%2==0){
-                    gpio_clear(LED_RED_PORT, LED_RED_PIN);
-                    coin_flip=1;
-                } else {
-                    gpio_clear(LED_GREEN_PORT, LED_GREEN_PIN);
-                    coin_flip=2;
-                }
-                tick_count = 0;
-            }
-            average = 0;
-        }
-
-        tick_count++;
-
-        if(tick_count == LED_ON_DELAY) {
-            gpio_set(LED_GREEN_PORT, LED_GREEN_PIN);
-            gpio_set(LED_RED_PORT, LED_RED_PIN);
-            // coin_flip = 0;
-        } else if(tick_count >= LED_OFF_DELAY) {
-            coin_flip = 0;
-        }
-    }
 }
