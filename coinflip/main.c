@@ -17,7 +17,8 @@
 
 // Make this program compatible with Toboot-V2.0
 #include <toboot.h>
-TOBOOT_CONFIGURATION(TOBOOT_CONFIG_FLAG_AUTORUN);
+TOBOOT_CONFIGURATION(0);
+// TOBOOT_CONFIGURATION(TOBOOT_CONFIG_FLAG_AUTORUN);
 
 #define LED_GREEN_PORT GPIOA
 #define LED_GREEN_PIN GPIO0
@@ -82,7 +83,6 @@ static volatile bool g_capsense_running = false;
 // Function prototypes so that our main loop can be at the top of the file for readability purposes
 static void ACMP_CapsenseChannelSet(uint32_t channel);
 static void CAPSENSE_Measure(uint32_t channel);
-static void CAPSENSE_Measure(uint32_t channel);
 void timer0_isr(void);
 void capsense_start(void);
 void capsense_stop(void);
@@ -91,7 +91,7 @@ static void setup_capsense(void);
 static void setup(void);
 
 // Main loop called to 
-int main(int argc, char **argv)
+int main(void)
 {
     uint32_t last_generation = 0;
     uint32_t tick_count = 0;
@@ -183,8 +183,8 @@ static void ACMP_CapsenseChannelSet(uint32_t channel)
                         | ACMP_INPUTSEL_NEGSEL(ACMP_INPUTSEL_NEGSEL_CAPSENSE)
                         | (channel << _ACMP_INPUTSEL_POSSEL_SHIFT);
     }
-    else if (channel == 2) {};
-    else if (channel == 3) {};
+    else if (channel == 2) {}
+    else if (channel == 3) {}
     else
         while(1);
 }
@@ -389,6 +389,10 @@ static void setup(void)
     /* Set up both LEDs as outputs */
     gpio_mode_setup(LED_RED_PORT, GPIO_MODE_WIRED_AND, LED_RED_PIN);
     gpio_mode_setup(LED_GREEN_PORT, GPIO_MODE_WIRED_AND, LED_GREEN_PIN);
+
+    // Disable GPIO for pin PC1 (CAP1A, red LED button).
+    // This pin was enabled as Output by Toboot bootloader, it interferes with the analog comparator.
+    gpio_mode_setup(GPIOC, GPIO_MODE_DISABLE, GPIO1);
 
     setup_capsense();
 }
