@@ -18,6 +18,8 @@
 // Make this program compatible with Toboot-V2.0
 #include <toboot.h>
 TOBOOT_CONFIGURATION(0);
+// Use below line instead of above to autorun program on inserting Tomu board
+// You will need to connect the outer two button tracks to reprogram again
 // TOBOOT_CONFIGURATION(TOBOOT_CONFIG_FLAG_AUTORUN);
 
 #define LED_GREEN_PORT GPIOA
