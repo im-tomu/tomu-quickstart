@@ -59,7 +59,6 @@ TOBOOT_CONFIGURATION(0);
 #define DEVICE_VER                0x0101    /* Program version */
 
 // Declare functions
-void run_powershell();
 void injkeys(char *source,uint8_t mod);
 
 bool g_usbd_is_connected = false;
