@@ -35,28 +35,30 @@
 #include <libopencm3/efm32/wdog.h>
 #include <libopencm3/efm32/gpio.h>
 #include <libopencm3/efm32/cmu.h>
-
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <toboot.h>
 
-/* Systick interrupt frequency, Hz */
+/* Declare support for Toboot V2 */
+/* To enable this program to run when you first plug in Tomu, pass
+ * TOBOOT_CONFIG_FLAG_AUTORUN to this macro.  Otherwise, leave the
+ * configuration value at 0 to use the defaults.
+ */
+// TOBOOT_CONFIGURATION(TOBOOT_CONFIG_FLAG_AUTORUN);
+TOBOOT_CONFIGURATION(0);
+
 #define SYSTICK_FREQUENCY 100
-
-/* Default AHB (core clock) frequency of Tomu board */
 #define AHB_FREQUENCY 14000000
-
 #define LED_GREEN_PORT GPIOA
 #define LED_GREEN_PIN  GPIO0
 #define LED_RED_PORT   GPIOB
 #define LED_RED_PIN    GPIO7
-
 #define VENDOR_ID                 0x1209    /* pid.code */
 #define PRODUCT_ID                0x70b1    /* Assigned to Tomu project */
 #define DEVICE_VER                0x0101    /* Program version */
 
 // Declare functions
-void run_notepad();
 void injkeys(char *source,uint8_t mod);
 
 bool g_usbd_is_connected = false;
@@ -92,11 +94,9 @@ static const uint8_t hid_report_descriptor[] = {
         0x75, 0x01, // REPORT_SIZE (1)
         0x95, 0x08, // REPORT_COUNT (8)
         0x81, 0x02, // INPUT (Data,Var,Abs) //1 byte
-
         0x95, 0x01, // REPORT_COUNT (1)
         0x75, 0x08, // REPORT_SIZE (8)
         0x81, 0x03, // INPUT (Cnst,Var,Abs) //1 byte
-
         0x95, 0x06, // REPORT_COUNT (6)
         0x75, 0x08, // REPORT_SIZE (8)
         0x15, 0x00, // LOGICAL_MINIMUM (0)
@@ -105,7 +105,6 @@ static const uint8_t hid_report_descriptor[] = {
         0x19, 0x00, // USAGE_MINIMUM (Reserved (no event indicated))
         0x29, 0x65, // USAGE_MAXIMUM (Keyboard Application)
         0x81, 0x00, // INPUT (Data,Ary,Abs) //6 bytes
-
         0xc0, // END_COLLECTION
 };
 
@@ -148,9 +147,7 @@ const struct usb_interface_descriptor hid_iface = {
 	.bInterfaceSubClass = 1, /* boot */
 	.bInterfaceProtocol = 1, // 1=keyboard, 2=mouse
 	.iInterface = 0,
-
 	.endpoint = &hid_endpoint,
-
 	.extra = &hid_function,
 	.extralen = sizeof(hid_function),
 };
@@ -182,8 +179,7 @@ static const char *usb_strings[] = {
 uint8_t usbd_control_buffer[128];
 
 static enum usbd_request_return_codes hid_control_request(usbd_device *dev, struct usb_setup_data *req, uint8_t **buf, uint16_t *len,
-			void (**complete)(usbd_device *, struct usb_setup_data *))
-{
+			void (**complete)(usbd_device *, struct usb_setup_data *)) {
 	(void)complete;
 	(void)dev;
 
@@ -192,23 +188,20 @@ static enum usbd_request_return_codes hid_control_request(usbd_device *dev, stru
 	   (req->wValue != 0x2200))
 		return 0;
 
-	/* Handle the HID report descriptor. */
+	// Handle the HID report descriptor
 	*buf = (uint8_t *)hid_report_descriptor;
 	*len = sizeof(hid_report_descriptor);
 
-    /* Dirty way to know if we're connected */
+    // Dirty way to know if we're connected
     g_usbd_is_connected = true;
 
 	return 1;
 }
 
-static void hid_set_config(usbd_device *dev, uint16_t wValue)
-{
+static void hid_set_config(usbd_device *dev, uint16_t wValue) {
 	(void)wValue;
 	(void)dev;
-
 	usbd_ep_setup(dev, 0x81, USB_ENDPOINT_ATTR_INTERRUPT, 8, NULL);
-
 	usbd_register_control_callback(
 				dev,
 				USB_REQ_TYPE_STANDARD | USB_REQ_TYPE_INTERFACE,
@@ -216,90 +209,291 @@ static void hid_set_config(usbd_device *dev, uint16_t wValue)
 				hid_control_request);
 }
 
-void usb_isr(void)
-{
+void usb_isr(void) {
     usbd_poll(g_usbd_dev);
 }
 
-void hard_fault_handler(void)
-{
+void hard_fault_handler(void) {
     while(1);
 }
 
-void sys_tick_handler(void)
-{
-    if(g_usbd_is_connected && once) {
+// Modifier info: https://wiki.osdev.org/USB_Human_Interface_Devices#Report_format
+void sys_tick_handler(void) {
+	// mod 0 == no mod
+	// mod 1 == left ctrl
+	// mod 2 == left shift
+	// mod 3 == left ctrl + shift 
+	// mod 4 == left alt
+	// mod 5 == left ctrl + alt
+	// mod 6 == left shift + alt
+	// mod 7 == left ctrl + shift + alt
+	// mod 8 == left super 
+	// mod 9 == left ctrl + super 
+	// mod 10 == left shift + super 
+	// mod 11 == left ctrl + shift + super
+	// mod 12 == left alt + super
+	// mod 13 == left ctrl + alt + super
+	// mod 14 == left shift + alt + super
+	// mod 15 == left ctrl + shift + alt + super
+	// \r carriage return
+	// \a application / commonly right click
+	// \t tab
+	// \v f11
+	// \0 right arrow
+	// \1 left arrow
+	// \2 down arrow
+	// \3 up arrow
+	// \4 win key
+	// \5 left ctrl
+	// \6 left alt
+	if(g_usbd_is_connected && once) {
+		for(int i = 0; i != 1500000; ++i) __asm__("nop");  // wait before keys injection	
+		
+		// Sample to inject common keys needed for scripting (excluding carriage return)
+		// injkeys("`~1!2@3#4$5%6^7&8*9(0)-_=+ abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ [{]}\\|;:\'\",<.>/?",0);
+		
+		// Sample injecting multiple identical chars in a row 
+		// injkeys("a bb ccc dddd eeeee ffffff ggggggg hhhhhhhh",0);
+		
+		// Sample injecting 5x carriage returns
+		// injkeys("\r\r\r\r\r",0);
+		
+		// Sample to inject left super (winkey)
+		// injkeys("\4",0);
+		
+		// Sample to inject hi then left arrow and inject before hi: 
+		injkeys("hi\1\1before hi: ",0);
+		
+		// Sample to inject ech, tab complete to echo, type hi, then return 
+		// injkeys("ech\t hi\r",0);
+		
+		// Sample to inject left super key once
+		// injkeys("\4",0);
 
-	for(int i = 0; i != 3500000; ++i) __asm__("nop");  // wait before keys injection	
-	// run_notepad(); // Uncomment to open notepad on Windows
-	injkeys("this is an example of key injection 0123456789",0);
-	injkeys(" . . ",0); // Can't send two consecutive identical caracters ...
-	injkeys("this is an example of key injection 0123456789",2);
-	once=false;
-    }
+		// Sample to open powershell, run sendkey script to raise volume, exit powershell, open msedge, navigate to nyan.cat, and tab to wtf nyan cat 
+		// inject left super (winkey) + "r", to open the "Run" console.
+		// injkeys("r",8);
+		// for(int i = 0; i != 1500000; ++i) __asm__("nop");  // wait
+		// injkeys("powershell\r",0);
+		// for(int i = 0; i != 20000000; ++i) __asm__("nop");  // wait
+		// injkeys("\r",0);
+		// for(int i = 0; i != 1500000; ++i) __asm__("nop");  // wait
+		// injkeys("\r",0);
+		// injkeys("$obj.SendKeys([char]175)",0);
+		// for(int i = 0; i != 1500000; ++i) __asm__("nop");  // wait
+		// injkeys("\r",2);
+		// for(int i = 0; i != 500000; ++i) __asm__("nop");  // wait
+		// injkeys("$obj = new-object -com wscript.shell\r",0);
+		// injkeys("\r",0);
+		// injkeys("\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r\3\r",0);
+		// injkeys("exit\r",0);
+		// for(int i = 0; i != 1500000; ++i) __asm__("nop");  // wait
+		// injkeys("r",8);
+		// for(int i = 0; i != 1500000; ++i) __asm__("nop");  // wait
+		// injkeys("msedge -inprivate nyan.cat\r",0);
+		// for(int i = 0; i != 10000000; ++i) __asm__("nop");  // wait
+		// injkeys("\v",0);
+		// injkeys("\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\r",0);
+
+		once=false;
+		}
 }
 
-// HID Usage Tables
+// https://www.freecodecamp.org/news/ascii-table-hex-to-ascii-value-character-code-chart-2/
 // https://www.usb.org/sites/default/files/documents/hut1_12v2.pdf
-
-void injkeys(char *source,uint8_t mod)
-{
+void injkeys(char *source,uint8_t mod) {
 	static uint8_t buf[8] = {0, 0, 0, 0, 0, 0, 0, 0}; // key pressed
 	static uint8_t buf2[8] = {0, 0, 0, 0, 0, 0, 0, 0}; // Key released
-	int i;
 	if(g_usbd_is_connected) {
-	buf[0]=mod; // Key modifier, 2=LeftShift
-
-	int lstr=strlen(source);
-	// change ascii to keyboard map
-	for (int j = 0; j < lstr; j++){
-		if(source[j]>48&&source[j]<58) // numbers 1-9
-			buf[2]=source[j]-19;
-		else if (source[j]==48) // number 0
-			buf[2]=39;
-		else if (source[j]==32) // space bar
-			buf[2]=44;
-		else if(source[j]==46) // .
-			buf[2]=55;
-		else if(source[j]=='\r') // CR (Enter)
-			buf[2]=40;
-		else
-			buf[2]=source[j]-93; // lowercase letters
-
-		usbd_ep_write_packet(g_usbd_dev, 0x81, buf, 8);
-		for(i = 0; i != 150; ++i) __asm__("nop");
-		usbd_ep_write_packet(g_usbd_dev, 0x81, buf2, 8);
-        	for(i = 0; i != 150000; ++i) //Wait a little
-				__asm__("nop");
-
-  	}
-		usbd_ep_write_packet(g_usbd_dev, 0x81, buf2, 8); // Be sure key is released
-        	for(i = 0; i != 150000; ++i) //Wait a little
-				__asm__("nop");
- }
-
+		// change ascii to keyboard map
+		int j = 0;
+		int injstrlen = strlen(source);
+		while (injstrlen > j) {
+			buf[0]=mod; // Key modifier, 0=None
+			if(source[j]>96&&source[j]<123){ // a-z
+				buf[2]=source[j]-93;
+			}
+			else if(mod<1&&source[j]>64&&source[j]<91){ // A-Z
+				buf[0]=2; // 2=LeftShift
+				buf[2]=source[j]-61;
+			}
+			else if(source[j]>48&&source[j]<58){ // 1-9
+				buf[2]=source[j]-19;
+			}
+			else if(source[j]==48){ // number 0
+				buf[2]=39;
+			}
+			else{
+				switch(source[j]){
+					case 32: // spacebar
+						buf[2]=44;
+						break;
+					case 33: // !
+						buf[0]=2; // 2=LeftShift
+						buf[2]=30;
+						break;
+					case 34: // "
+						buf[0]=2; // 2=LeftShift
+						buf[2]=52;
+						break;
+					case 35: // #
+						buf[0]=2; // 2=LeftShift
+						buf[2]=32;
+						break;
+					case 36: // $
+						buf[0]=2; // 2=LeftShift
+						buf[2]=33;
+						break;
+					case 37: // %
+						buf[0]=2; // 2=LeftShift
+						buf[2]=34;
+						break;
+					case 38: // &
+						buf[0]=2; // 2=LeftShift
+						buf[2]=36;
+						break;
+					case 39 : // '
+						buf[2]=52;
+						break;
+					case 40 : // (
+						buf[0]=2; // 2=LeftShift
+						buf[2]=38;
+						break;
+					case 41 : // )
+						buf[0]=2; // 2=LeftShift
+						buf[2]=39;
+						break;
+					case 42 : // *
+						buf[0]=2; // 2=LeftShift
+						buf[2]=37;
+						break;
+					case 43 : // +
+						buf[0]=2; // 2=LeftShift
+						buf[2]=46;
+						break;
+					case 44 : // ,
+						buf[2]=54;
+						break;
+					case 45 : // -
+						buf[2]=45;
+						break;
+					case 46 : // .
+						buf[2]=55;
+						break;
+					case 47 : // /
+						buf[2]=56;
+						break;
+					case 58 : // :
+						buf[0]=2; // 2=LeftShift
+						buf[2]=51;
+						break;
+					case 59 : // ;
+						buf[2]=51;
+						break;
+					case 60 : // <
+						buf[0]=2; // 2=LeftShift
+						buf[2]=54;
+						break;
+					case 61 : // =
+						buf[2]=46;
+						break;
+					case 62 : // >
+						buf[0]=2; // 2=LeftShift
+						buf[2]=55;
+						break;
+					case 63 : // ?
+						buf[0]=2; // 2=LeftShift
+						buf[2]=56;
+						break;
+					case 64 : // @
+						buf[0]=2; // 2=LeftShift
+						buf[2]=31;
+						break;
+					case 91 : // [
+						buf[2]=47;
+						break;
+					case 92 : // backslash
+						buf[2]=49;
+						break;
+					case 93 : // ]
+						buf[2]=48;
+						break;
+					case 94 : // ^
+						buf[0]=2; // 2=LeftShift
+						buf[2]=35;
+						break;
+					case 95 : // _
+						buf[0]=2; // 2=LeftShift
+						buf[2]=45;
+						break;
+					case 96 : // `
+						buf[2]=53;
+						break;
+					case 123 : // {
+						buf[0]=2; // 2=LeftShift
+						buf[2]=47;
+						break;
+					case 124 : // |
+						buf[0]=2; // 2=LeftShift
+						buf[2]=49;
+						break;
+					case 125 : // }
+						buf[0]=2; // 2=LeftShift
+						buf[2]=48;
+						break;
+					case 126 : // ~
+						buf[0]=2; // 2=LeftShift
+						buf[2]=53;
+						break;
+					case '\r' : // carriage return / enter
+						buf[2]=40;
+						break;
+					case '\a' : // application / right click
+						buf[2]=101;
+						break;
+					case '\t' : // tab
+						buf[2]=43;
+						break;
+					case '\v' : // f11
+						buf[2]=68;
+						break;
+					case '\0' : // right arrow
+						buf[2]=79;
+						break;
+					case '\1' : // left arrow
+						buf[2]=80;
+						break;
+					case '\2' : // down arrow
+						buf[2]=81;
+						break;
+					case '\3' : // up arrow
+						buf[2]=82;
+						break;
+					case '\4' : // left win key
+						buf[0]=8;
+						break;
+					case '\5' : // left ctrl
+						buf[2]=29;
+						break;
+					case '\6' : // left alt
+						buf[2]=56;
+						break;
+					default:
+						buf[2]=source[j]-93; // lowercase letters
+				}
+			}
+			usbd_ep_write_packet(g_usbd_dev, 0x81, buf, 8);
+			for(int i = 0; i != 150; ++i) __asm__("nop");
+			usbd_ep_write_packet(g_usbd_dev, 0x81, buf2, 8);
+        		for(int i = 0; i != 150000; ++i) __asm__("nop");
+			usbd_ep_write_packet(g_usbd_dev, 0x81, buf2, 8); // Be sure key is released
+        		for(int i = 0; i != 150000; ++i) __asm__("nop");
+			j++;
+  			}
+		}
 }
 
-// Open "notepad" in Windows
-void run_notepad()
-{
-	// Modifier info: https://wiki.osdev.org/USB_Human_Interface_Devices#Report_format
-	#define LEFT_GUI_KEY 0x08 // Key modifier
-	
-	// Inject Left Gui (Winkey) + "r", to open the "Run" console.
-	injkeys("r", LEFT_GUI_KEY);
-
-	// Wait for the "Run" console to open before injecting command
-	for (unsigned int i = 0; i != 1500000; ++i) {
-		__asm__("nop");
-	}
-
-	// Inject string "notepad" + Enter key
-	injkeys("notepad\r", 0);
-}
-
-int main(void)
-{
+int main(void) {
     int i;
 
     /* Make sure the vector table is relocated correctly (after the Tomu bootloader) */
@@ -333,9 +527,8 @@ int main(void)
     while(1) {
 
     gpio_toggle(LED_GREEN_PORT, LED_GREEN_PIN);
-    //    gpio_toggle(LED_RED_PORT, LED_RED_PIN);
+    gpio_toggle(LED_RED_PORT, LED_RED_PIN);
         for(i = 0; i != 500000; ++i)
 			__asm__("nop");
     }
 }
-
