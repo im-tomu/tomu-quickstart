@@ -39,14 +39,10 @@ TOBOOT_CONFIGURATION(0);
 #define PRODUCT_ID      0x70b1  // Assigned to Tomu project
 #define DEVICE_VER      0x0BEB  // Program version
 
-// Consecutive calls to usb_puts are not likely to be successful.
-// Without a delay between them, more often than not only the first call is executed.
-// The delay allows the USB driver to finish writing to the endpoint.
-#define USB_PUTS_DELAY_USEC 4000
-
 #define TIMER_INPUT_CLOCK_FREQUENCY 24000000 // 24 MHz clock
 #define TIMER_TOP_CCV 1499
 #define INTERRUPT_TIMER_PRESCALER TIMER_CTRL_PRESC_DIV16 // Provides ~99% accuracy. Use PRESC_DIV2 for ~99.8% accuracy.
+#define EP_WRITE_RETRY_DELAY_USECS 50
 
 // Supported commands
 #define CMD_HELP 'H'
@@ -223,7 +219,7 @@ static const char *usb_strings[] =
 {
 	"Tomu",
 	"Serial Shell",
-	"LED PWM",
+	"Snake",
 };
 
 void udelay_busy(uint32_t usecs);
@@ -267,8 +263,8 @@ static void snake_setup(void)
     snake_head_x = SNAKE_BOARD_WIDTH / 2;
     snake_head_y = SNAKE_BOARD_HEIGHT / 2;
 
-    prng_seed ^= (uint32_t)&snake_head_x;
-    prng_seed = prng_seed * 1103515245UL + 12345;
+	// Add randomness, using the timer value when the game setup was called.
+    prng_seed ^= TIMER0_CNT;
 
     fruit_x = 10 + simple_rand(SNAKE_BOARD_WIDTH - 20);
     fruit_y = 5  + simple_rand(SNAKE_BOARD_HEIGHT - 10);
@@ -324,6 +320,7 @@ static void snake_logic(void)
 			gpio_clear(LED_GREEN_PORT, LED_GREEN_PIN);
 		}
         
+		/* Limit the fruit position ranges, keep a little distance from the board walls for aesthetics and fairness. */
 		fruit_x = 5 + simple_rand(SNAKE_BOARD_WIDTH - 10);
         fruit_y = 3 + simple_rand(SNAKE_BOARD_HEIGHT - 6);
     }
@@ -470,11 +467,14 @@ void udelay_busy(uint32_t usecs)
 		 * We want to sleep for 1 usec, and there are cycles per usec at 24 MHz.
 		 * Therefore, loop 6 times, as 6*4=24.
 		 */
-		asm("mov   r1, #6");
-		asm("retry:");
-		asm("sub r1, #1");
-		asm("bne retry");
-		asm("nop");
+		asm volatile(
+			"mov   r1, #6\n"
+			"retry:\n"
+			"sub   r1, #1\n"
+			"bne   retry\n"
+			"nop"
+			: : : "r1"
+		);
 	}
 }
 
@@ -514,7 +514,6 @@ static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
 	uint32_t len = usbd_ep_read_packet(usbd_dev, 0x01, buf, sizeof(buf));
 
 	if (len) {
-		// Look for '\r' and append '\n'
 		uint32_t i;
 		uint32_t new_len = 0;
 		for (i = 0; (i < len) && (new_len < sizeof(buf)); i++) {
@@ -524,6 +523,7 @@ static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
 				return;  /* consume the char — never reaches shell parser */
 			}
 
+			// Look for '\r' and append '\n'
 			if (buf[i] == '\r') {
 				output[new_len++] = buf[i];
 				if (new_len >= sizeof(output))
@@ -584,8 +584,13 @@ static void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 
 static void usb_puts(char *s)
 {
-	if (g_usbd_is_connected) {
-		usbd_ep_write_packet(g_usbd_dev, 0x82, s, strnlen(s, 64));
+	if (!g_usbd_is_connected) return;
+
+	uint16_t return_value = usbd_ep_write_packet(g_usbd_dev, 0x82, s, strnlen(s, 64));
+	// The endpoint might be busy transmitting, wait a little and retry.
+	while (!return_value) {
+		udelay_busy(EP_WRITE_RETRY_DELAY_USECS);
+		return_value = usbd_ep_write_packet(g_usbd_dev, 0x82, s, strnlen(s, 64));
 	}
 }
 
@@ -600,11 +605,14 @@ static void usb_puts_full(const char *s)
         size_t chunk = len - offset;
         if (chunk > 64) chunk = 64;
 
-        usbd_ep_write_packet(g_usbd_dev, 0x82, (void*)(s + offset), chunk);
-        offset += chunk;
+        uint16_t return_value = usbd_ep_write_packet(g_usbd_dev, 0x82, (void*)(s + offset), chunk);
+		// The endpoint might be busy transmitting, wait a little and retry.
+		while (!return_value) {
+			udelay_busy(EP_WRITE_RETRY_DELAY_USECS);
+			return_value = usbd_ep_write_packet(g_usbd_dev, 0x82, (void*)(s + offset), chunk);
+		}
 
-		udelay_busy(200);   /* <-- increased from 50 — this fixes PuTTY tearing */
-		// Without the delay the printout won't always be handled correctly in the terminal
+        offset += chunk;
     }
 }
 
@@ -725,28 +733,13 @@ static bool parse_numeric_value(char* buffer, uint32_t len, uint32_t* numeric_va
 static void print_help()
 {
 	usb_puts("\r\nUsage: <COMMAND>[PARAMETERS] <COMMAND>...");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nSupported commands: <H,D,E,S,F,L>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nPrint help message: <H>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nDisable/Enable debug printout: <D><0,1>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nDisable/Enable serial shell echo: <E><0,1>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nPlay Snake: <S>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nDisable/Enable Snake LED feedback: <F><0,1>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-		
 	usb_puts("\r\nSnake speed level: <L><##>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
 }
 
 static void handle_command(uint8_t* cmd_buffer, uint32_t buffer_len)
@@ -807,11 +800,9 @@ static void handle_command(uint8_t* cmd_buffer, uint32_t buffer_len)
 				snake_tick_ms = SNAKE_TICK_MS_MAX - ((speed_level - 1) * SNAKE_TICK_MS_INCREMENT);
 
 				usb_puts("\r\nSnake speed level: ");
-				udelay_busy(USB_PUTS_DELAY_USEC);
 				char level_buf[4];
 				itoa(speed_level, level_buf, 10);
 				usb_puts(level_buf);
-				udelay_busy(USB_PUTS_DELAY_USEC);
 				usb_puts("\r\n");
 			break;
 
