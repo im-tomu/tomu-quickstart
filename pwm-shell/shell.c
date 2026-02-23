@@ -42,16 +42,12 @@ TOBOOT_CONFIGURATION(0);
 #define PRODUCT_ID      0x70b1  // Assigned to Tomu project
 #define DEVICE_VER      0x0BEB  // Program version
 
-// Consecutive calls to usb_puts are not likely to be successful.
-// Without a delay between them, more often than not only the first call is executed.
-// The delay allows the USB driver to finish writing to the endpoint.
-#define USB_PUTS_DELAY_USEC 4000
-
 #define TIMER_INPUT_CLOCK_FREQUENCY 24000000 // 24 MHz clock
 #define LED_PWM_TIMER_TOP_CCV 100
 #define LED_PWM_TIMER_PRESCALER TIMER_CTRL_PRESC_DIV16 // Provides ~99% accuracy. Use PRESC_DIV2 for ~99.8% accuracy.
 #define LED_PWM_TIMER_CYCLES_DENOMINATOR ((LED_PWM_TIMER_TOP_CCV + 1) * (1 << LED_PWM_TIMER_PRESCALER))
 #define LED_PWM_TIMER_CYCLES_PER_MILLISECOND (uint32_t) ((((float) TIMER_INPUT_CLOCK_FREQUENCY / LED_PWM_TIMER_CYCLES_DENOMINATOR) + 500) / 1000)
+#define EP_WRITE_RETRY_DELAY_USECS 50
 
 // Duty cycle percentage
 #define MAX_PWM_VALUE 100
@@ -289,11 +285,14 @@ void udelay_busy(uint32_t usecs)
 		 * We want to sleep for 1 usec, and there are cycles per usec at 24 MHz.
 		 * Therefore, loop 6 times, as 6*4=24.
 		 */
-		asm("mov   r1, #6");
-		asm("retry:");
-		asm("sub r1, #1");
-		asm("bne retry");
-		asm("nop");
+		asm volatile(
+			"mov   r1, #6\n"
+			"retry:\n"
+			"sub   r1, #1\n"
+			"bne   retry\n"
+			"nop"
+			: : : "r1"
+		);
 	}
 }
 
@@ -333,10 +332,10 @@ static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
 	uint32_t len = usbd_ep_read_packet(usbd_dev, 0x01, buf, sizeof(buf));
 
 	if (len) {
-		// Look for '\r' and append '\n'
 		uint32_t i;
 		uint32_t new_len = 0;
 		for (i = 0; (i < len) && (new_len < sizeof(buf)); i++) {
+			// Look for '\r' and append '\n'
 			if (buf[i] == '\r') {
 				output[new_len++] = buf[i];
 				if (new_len >= sizeof(output))
@@ -397,8 +396,13 @@ static void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 
 static void usb_puts(char *s)
 {
-	if (g_usbd_is_connected) {
-		usbd_ep_write_packet(g_usbd_dev, 0x82, s, strnlen(s, 64));
+	if (!g_usbd_is_connected) return;
+
+	uint16_t return_value = usbd_ep_write_packet(g_usbd_dev, 0x82, s, strnlen(s, 64));
+	// The endpoint might be busy transmitting, wait a little and retry.
+	while (!return_value) {
+		udelay_busy(EP_WRITE_RETRY_DELAY_USECS);
+		return_value = usbd_ep_write_packet(g_usbd_dev, 0x82, s, strnlen(s, 64));
 	}
 }
 
@@ -756,9 +760,7 @@ static bool set_led_cfg_value(enum led_colour led, uint8_t field, uint32_t numer
 		char message_buf[11];
 		itoa(numeric_value, message_buf, 10);
 		usb_puts("\r\nSet value: ");
-		udelay_busy(USB_PUTS_DELAY_USEC);
 		usb_puts(message_buf);
-		udelay_busy(USB_PUTS_DELAY_USEC);
 	}
 
 	return true;
@@ -826,10 +828,8 @@ static void set_led_test_mode(struct led_pwm_cfg* led_cfg, uint32_t mode)
 	if (g_debug_prints_enabled) {
 		char message_buf[4];
 		usb_puts("\r\nSet test mode: ");
-		udelay_busy(USB_PUTS_DELAY_USEC);
 		itoa(mode, message_buf, 10);
 		usb_puts(message_buf);
-		udelay_busy(USB_PUTS_DELAY_USEC);
 	}
 }
 
@@ -942,52 +942,25 @@ static void print_led_cfg(struct led_pwm_cfg* led_cfg)
 	char string_buffer[12];
 
 	usb_puts("\r\n=== LED CFG ===");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-	
 	usb_puts("\r\nMin brightness %: ");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-	
 	itoa(led_cfg->min_brightness, string_buffer, 10);
 	usb_puts(string_buffer);
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nMax brightness %: ");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-	
 	itoa(led_cfg->max_brightness, string_buffer, 10);
 	usb_puts(string_buffer);
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nLow duration ms: ");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-	
 	itoa(led_cfg->low_duration_ms, string_buffer, 10);
 	usb_puts(string_buffer);
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nRamp up time ms: ");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-	
 	itoa(led_cfg->ramp_up_ms, string_buffer, 10);
 	usb_puts(string_buffer);
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nHigh duration ms: ");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-	
 	itoa(led_cfg->high_duration_ms, string_buffer, 10);
 	usb_puts(string_buffer);
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nRamp down time ms: ");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-	
 	itoa(led_cfg->ramp_down_ms, string_buffer, 10);
 	usb_puts(string_buffer);
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nCurrent Phase [Low, Ramp up, High, Ramp Down]: ");
-	udelay_busy(USB_PUTS_DELAY_USEC);
 	
 	// Output the current phase as a letter
 	string_buffer[1] = '\r';
@@ -1013,37 +986,19 @@ static void print_led_cfg(struct led_pwm_cfg* led_cfg)
 	}
 	
 	usb_puts(string_buffer);
-	udelay_busy(USB_PUTS_DELAY_USEC);
 }
 
 static void print_help()
 {
 	usb_puts("\r\nUsage: <COMMAND>[PARAMETERS] <COMMAND>...");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nSupported commands: <H,T,D,E,P,S,G,R>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nPrint help message: <H>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nAdvance both LEDs to their next test mode: <T>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nDisable/Enable debug printout: <D><0,1>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nDisable/Enable serial shell echo: <E><0,1>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nPrint current configuration of the Green/Red LED: <P><G,R>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nSync LEDs from phase (Green,Red): <S><[L,U,H,D][L,U,H,D]>");
-	udelay_busy(USB_PUTS_DELAY_USEC);
-
 	usb_puts("\r\nSet Green/Red LED config: <G,R><T,N,X,L,U,H,D,P>\r\n");
-	udelay_busy(USB_PUTS_DELAY_USEC);
 }
 
 static void handle_command(uint8_t* cmd_buffer, uint32_t buffer_len)
